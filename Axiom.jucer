@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="yR4TM7" name="Axiom" projectType="audioplug" useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0" displaySplashScreen="1" jucerFormatVersion="1"
+              version="0.1.0" companyName="Berzerker Beats" bundleIdentifier="com.berzerkerbeats.axiom"
+              cppLanguageStandard="20" pluginFormats="buildAU,buildStandalone,buildVST3"
+              pluginCharacteristicsValue="pluginIsSynth,pluginWantsMidiIn"
+              pluginName="Axiom" pluginDesc="AI instrument reconstruction synthesizer"
+              pluginManufacturer="Berzerker Beats" pluginManufacturerCode="Bzrk"
+              pluginCode="Axm1" pluginAUExportPrefix="AxiomAU" pluginVST3Category="Instrument|Synth">
+  <MAINGROUP id="ARvHW7" name="Axiom">
+    <GROUP id="{8CE2493C-C85F-B275-C7C8-5064A88246F9}" name="Source">
+      <GROUP id="{A1000001-0000-0000-0000-000000000001}" name="Core">
+        <FILE id="CoreAF1" name="AnalysisFeatures.h" compile="0" resource="0"
+              file="Source/Core/AnalysisFeatures.h"/>
+        <FILE id="CoreAZ1" name="AudioZone.h" compile="0" resource="0" file="Source/Core/AudioZone.h"/>
+        <FILE id="CoreIP1" name="InstrumentPatch.h" compile="0" resource="0"
+              file="Source/Core/InstrumentPatch.h"/>
+        <FILE id="CorePI1" name="ParamIDs.h" compile="0" resource="0" file="Source/Core/ParamIDs.h"/>
+      </GROUP>
+      <GROUP id="{A1000002-0000-0000-0000-000000000002}" name="Analysis">
+        <FILE id="AnaAA1h" name="AudioAnalyzer.h" compile="0" resource="0"
+              file="Source/Analysis/AudioAnalyzer.h"/>
+        <FILE id="AnaAA1c" name="AudioAnalyzer.cpp" compile="1" resource="0"
+              file="Source/Analysis/AudioAnalyzer.cpp"/>
+        <FILE id="AnaPD1h" name="PitchDetector.h" compile="0" resource="0"
+              file="Source/Analysis/PitchDetector.h"/>
+        <FILE id="AnaPD1c" name="PitchDetector.cpp" compile="1" resource="0"
+              file="Source/Analysis/PitchDetector.cpp"/>
+      </GROUP>
+      <GROUP id="{A1000003-0000-0000-0000-000000000003}" name="AI">
+        <FILE id="AiIE1h" name="InferenceEngine.h" compile="0" resource="0"
+              file="Source/AI/InferenceEngine.h"/>
+        <FILE id="AiOE1c" name="OnnxInferenceEngine.cpp" compile="1" resource="0"
+              file="Source/AI/OnnxInferenceEngine.cpp"/>
+        <FILE id="AiRC1h" name="Reconstructor.h" compile="0" resource="0"
+              file="Source/AI/Reconstructor.h"/>
+        <FILE id="AiRC1c" name="Reconstructor.cpp" compile="1" resource="0"
+              file="Source/AI/Reconstructor.cpp"/>
+        <FILE id="AiSN1h" name="StemSeparation.h" compile="0" resource="0"
+              file="Source/AI/StemSeparation.h"/>
+        <FILE id="AiSN1c" name="StemSeparation.cpp" compile="1" resource="0"
+              file="Source/AI/StemSeparation.cpp"/>
+        <FILE id="AiSS1h" name="StemSeparator.h" compile="0" resource="0"
+              file="Source/AI/StemSeparator.h"/>
+      </GROUP>
+      <GROUP id="{A1000004-0000-0000-0000-000000000004}" name="Synth">
+        <FILE id="SynWT1h" name="Wavetable.h" compile="0" resource="0" file="Source/Synth/Wavetable.h"/>
+        <FILE id="SynSM1h" name="SynthModules.h" compile="0" resource="0"
+              file="Source/Synth/SynthModules.h"/>
+        <FILE id="SynVo1h" name="Voice.h" compile="0" resource="0" file="Source/Synth/Voice.h"/>
+        <FILE id="SynEC1h" name="EffectsChain.h" compile="0" resource="0"
+              file="Source/Synth/EffectsChain.h"/>
+        <FILE id="SynSE1h" name="SynthEngine.h" compile="0" resource="0"
+              file="Source/Synth/SynthEngine.h"/>
+        <FILE id="SynSE1c" name="SynthEngine.cpp" compile="1" resource="0"
+              file="Source/Synth/SynthEngine.cpp"/>
+      </GROUP>
+      <GROUP id="{A1000007-0000-0000-0000-000000000007}" name="Preset">
+        <FILE id="PrePM1h" name="PresetManager.h" compile="0" resource="0"
+              file="Source/Preset/PresetManager.h"/>
+        <FILE id="PrePM1c" name="PresetManager.cpp" compile="1" resource="0"
+              file="Source/Preset/PresetManager.cpp"/>
+      </GROUP>
+      <GROUP id="{A1000005-0000-0000-0000-000000000005}" name="Export">
+        <FILE id="ExpIE1h" name="InstrumentExporter.h" compile="0" resource="0"
+              file="Source/Export/InstrumentExporter.h"/>
+        <FILE id="ExpIE1c" name="InstrumentExporter.cpp" compile="1" resource="0"
+              file="Source/Export/InstrumentExporter.cpp"/>
+      </GROUP>
+      <GROUP id="{A1000006-0000-0000-0000-000000000006}" name="GUI">
+        <FILE id="GuiLF1h" name="AxiomLookAndFeel.h" compile="0" resource="0"
+              file="Source/GUI/AxiomLookAndFeel.h"/>
+        <FILE id="GuiLF1c" name="AxiomLookAndFeel.cpp" compile="1" resource="0"
+              file="Source/GUI/AxiomLookAndFeel.cpp"/>
+        <FILE id="GuiES1h" name="EmbeddingSphereView.h" compile="0" resource="0"
+              file="Source/GUI/EmbeddingSphereView.h"/>
+        <FILE id="GuiES1c" name="EmbeddingSphereView.cpp" compile="1" resource="0"
+              file="Source/GUI/EmbeddingSphereView.cpp"/>
+        <FILE id="GuiWV1h" name="WaveformView.h" compile="0" resource="0"
+              file="Source/GUI/WaveformView.h"/>
+        <FILE id="GuiWV1c" name="WaveformView.cpp" compile="1" resource="0"
+              file="Source/GUI/WaveformView.cpp"/>
+        <FILE id="GuiPV1h" name="PatchView.h" compile="0" resource="0" file="Source/GUI/PatchView.h"/>
+        <FILE id="GuiPV1c" name="PatchView.cpp" compile="1" resource="0"
+              file="Source/GUI/PatchView.cpp"/>
+        <FILE id="GuiPB1h" name="PresetBar.h" compile="0" resource="0" file="Source/GUI/PresetBar.h"/>
+        <FILE id="GuiPB1c" name="PresetBar.cpp" compile="1" resource="0"
+              file="Source/GUI/PresetBar.cpp"/>
+      </GROUP>
+      <FILE id="pO87mD" name="PluginProcessor.cpp" compile="1" resource="0"
+            file="Source/PluginProcessor.cpp"/>
+      <FILE id="y4sBBu" name="PluginProcessor.h" compile="0" resource="0"
+            file="Source/PluginProcessor.h"/>
+      <FILE id="NDLwoO" name="PluginEditor.cpp" compile="1" resource="0"
+            file="Source/PluginEditor.cpp"/>
+      <FILE id="c8wBnW" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
+    </GROUP>
+  </MAINGROUP>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_VST3_CAN_REPLACE_VST2="0"/>
+  <EXPORTFORMATS>
+    <LINUX_MAKE targetFolder="Builds/LinuxMakefile">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Axiom"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Axiom"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../../JUCE/modules"/>
+      </MODULEPATHS>
+    </LINUX_MAKE>
+    <VS2022 targetFolder="Builds/VisualStudio2022">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Axiom"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Axiom"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../../JUCE/modules"/>
+      </MODULEPATHS>
+    </VS2022>
+    <XCODE_MAC targetFolder="Builds/MacOSX" extraDefs="AXIOM_ENABLE_ONNX=1"
+               externalLibraries="onnxruntime">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Axiom" osxArchitecture="Native"
+                       headerPath="/usr/local/opt/onnxruntime/include/onnxruntime"
+                       libraryPath="/usr/local/opt/onnxruntime/lib"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Axiom" osxArchitecture="Native"
+                       headerPath="/usr/local/opt/onnxruntime/include/onnxruntime"
+                       libraryPath="/usr/local/opt/onnxruntime/lib"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../../JUCE/modules"/>
+      </MODULEPATHS>
+    </XCODE_MAC>
+  </EXPORTFORMATS>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="1"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+  </MODULES>
+</JUCERPROJECT>
