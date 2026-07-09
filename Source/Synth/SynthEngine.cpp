@@ -27,7 +27,7 @@ void SynthEngine::releaseResources()
 }
 
 //==============================================================================
-void SynthEngine::setPatch (const InstrumentPatch& newPatch) noexcept
+int SynthEngine::prepareInactiveSlot (const InstrumentPatch& newPatch)
 {
     const int inactive = 1 - activePatchSlot.load (std::memory_order_acquire);
     patchSlots[(size_t) inactive] = newPatch;
@@ -42,12 +42,35 @@ void SynthEngine::setPatch (const InstrumentPatch& newPatch) noexcept
     else
         tableSlots[(size_t) inactive].clear();
 
+    return inactive;
+}
+
+void SynthEngine::setPatch (const InstrumentPatch& newPatch)
+{
+    const int inactive = prepareInactiveSlot (newPatch);
+
+    // Keep the resynthesis layer alive across knob-driven patch rewrites
+    // (message-thread copy; the audio thread only ever reads the active slot).
+    ddspSlots[(size_t) inactive] = ddspSlots[(size_t) (1 - inactive)];
+
+    activePatchSlot.store (inactive, std::memory_order_release);
+}
+
+void SynthEngine::setPatch (const InstrumentPatch& newPatch, DdspTimbre newTimbre)
+{
+    const int inactive = prepareInactiveSlot (newPatch);
+    ddspSlots[(size_t) inactive] = std::move (newTimbre);
     activePatchSlot.store (inactive, std::memory_order_release);
 }
 
 InstrumentPatch SynthEngine::getPatch() const noexcept
 {
     return patchSlots[(size_t) activePatchSlot.load (std::memory_order_acquire)];
+}
+
+const DdspTimbre& SynthEngine::getDdspTimbre() const noexcept
+{
+    return ddspSlots[(size_t) activePatchSlot.load (std::memory_order_acquire)];
 }
 
 //==============================================================================
@@ -134,10 +157,22 @@ void SynthEngine::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     if (numSamples > mixBuffer.getNumSamples())
         mixBuffer.setSize (2, numSamples, false, true, true);
 
-    // One slot-index load per block: patch and wavetables stay paired.
+    // One slot-index load per block: patch, wavetables and timbre stay paired.
     const int slot = activePatchSlot.load (std::memory_order_acquire);
     effective     = buildEffectivePatch (patchSlots[(size_t) slot]);
     currentTables = &tableSlots[(size_t) slot];
+    currentTimbre = &ddspSlots[(size_t) slot];
+
+    // Engine-layer routing. DDSP needs a timbre block; without one the
+    // recipe engine stays on regardless of the mode so keys never go silent.
+    {
+        const int mode = overrides != nullptr && overrides->engineMode != nullptr
+                             ? (int) overrides->engineMode->load (std::memory_order_relaxed)
+                             : (int) EngineMode::Recipe;
+        const bool timbreOk = currentTimbre->isValid();
+        ddspOn   = mode != (int) EngineMode::Recipe && timbreOk;
+        recipeOn = mode != (int) EngineMode::Ddsp || ! timbreOk;
+    }
 
     mixBuffer.clear (0, 0, numSamples);
     mixBuffer.clear (1, 0, numSamples);
@@ -190,7 +225,8 @@ void SynthEngine::renderSegment (int startSample, int numSamples)
 
     for (auto& v : voices)
         if (v.isActive())
-            v.render (l, r, numSamples, effective, bendSemis, currentTables);
+            v.render (l, r, numSamples, effective, bendSemis, currentTables,
+                      currentTimbre, recipeOn, ddspOn);
 }
 
 //==============================================================================

@@ -56,4 +56,8 @@ namespace axiom::params
 
     // Output
     inline constexpr auto masterGain  = "masterGain";
+
+    // Engine routing: Recipe synth / DDSP resynthesis / both layered
+    // (choice indices match axiom::EngineMode — order frozen).
+    inline constexpr auto engineMode  = "engineMode";
 }

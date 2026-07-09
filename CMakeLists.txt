@@ -50,6 +50,7 @@ target_sources(Axiom PRIVATE
     Source/PluginEditor.cpp
     Source/Analysis/AudioAnalyzer.cpp
     Source/Analysis/PitchDetector.cpp
+    Source/AI/DdspEncoder.cpp
     Source/AI/OnnxInferenceEngine.cpp
     Source/AI/Reconstructor.cpp
     Source/AI/StemSeparation.cpp
@@ -71,12 +72,48 @@ target_compile_definitions(Axiom PRIVATE
 
 if(AXIOM_ENABLE_ONNX)
     # Expects an ONNX Runtime distribution; point CMAKE_PREFIX_PATH at it,
-    # e.g. -DCMAKE_PREFIX_PATH=$(brew --prefix onnxruntime)
+    # e.g. -DCMAKE_PREFIX_PATH=$(brew --prefix onnxruntime) on macOS, or at an
+    # extracted onnxruntime-win-x64 release zip on Windows.
     if(APPLE AND NOT DEFINED CMAKE_PREFIX_PATH)
         list(APPEND CMAKE_PREFIX_PATH /usr/local/opt/onnxruntime /opt/homebrew/opt/onnxruntime)
+    elseif(WIN32 AND NOT DEFINED CMAKE_PREFIX_PATH)
+        list(APPEND CMAKE_PREFIX_PATH "$ENV{USERPROFILE}/Documents/onnxruntime")
     endif()
-    find_package(onnxruntime REQUIRED)
-    target_link_libraries(Axiom PRIVATE onnxruntime::onnxruntime)
+
+    find_package(onnxruntime QUIET)
+    if(onnxruntime_FOUND)
+        target_link_libraries(Axiom PRIVATE onnxruntime::onnxruntime)
+    else()
+        # The GitHub release zips ship a bare include/ + lib/ layout with no
+        # CMake package config, so resolve the pieces directly.
+        find_path(AXIOM_ONNX_INCLUDE_DIR onnxruntime_cxx_api.h PATH_SUFFIXES include)
+        find_library(AXIOM_ONNX_LIBRARY onnxruntime PATH_SUFFIXES lib)
+        if(NOT AXIOM_ONNX_INCLUDE_DIR OR NOT AXIOM_ONNX_LIBRARY)
+            message(FATAL_ERROR "AXIOM_ENABLE_ONNX=ON but ONNX Runtime was not found; "
+                                "set CMAKE_PREFIX_PATH to a distribution containing include/ and lib/")
+        endif()
+        target_include_directories(Axiom PRIVATE "${AXIOM_ONNX_INCLUDE_DIR}")
+        target_link_libraries(Axiom PRIVATE "${AXIOM_ONNX_LIBRARY}")
+    endif()
+
+    if(WIN32)
+        # Delay-load so hosts can always scan the plugin without the DLL, then
+        # ship onnxruntime.dll next to each binary for the runtime preload
+        # (see OnnxInferenceEngine.cpp).
+        target_link_options(Axiom PUBLIC /DELAYLOAD:onnxruntime.dll)
+        target_link_libraries(Axiom PRIVATE delayimp)
+        if(AXIOM_ONNX_LIBRARY)
+            get_filename_component(AXIOM_ONNX_LIB_DIR "${AXIOM_ONNX_LIBRARY}" DIRECTORY)
+            foreach(format_target IN ITEMS Axiom_Standalone Axiom_VST3)
+                if(TARGET ${format_target})
+                    add_custom_command(TARGET ${format_target} POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                                "${AXIOM_ONNX_LIB_DIR}/onnxruntime.dll"
+                                "$<TARGET_FILE_DIR:${format_target}>")
+                endif()
+            endforeach()
+        endif()
+    endif()
 endif()
 
 target_link_libraries(Axiom

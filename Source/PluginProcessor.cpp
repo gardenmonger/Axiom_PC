@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include "AI/DdspEncoder.h"
 #include "Analysis/AudioAnalyzer.h"
 #include "Core/ParamIDs.h"
 #include "Export/InstrumentExporter.h"
@@ -87,6 +88,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout AxiomAudioProcessor::createP
 
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { masterGain, 1 },    "Master",
                                                         NormalisableRange<float> (-24.0f, 12.0f), 0.0f));
+
+    // Order matches axiom::EngineMode. Without a DDSP timbre the engine
+    // falls back to the recipe path, so any choice is always audible.
+    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { engineMode, 1 },   "Engine",
+                                                         StringArray { "Recipe Synth", "DDSP Resynth", "Both Layered" }, 0));
     return { p.begin(), p.end() };
 }
 
@@ -129,6 +135,8 @@ void AxiomAudioProcessor::wireOverrides()
     overrides.width         = raw (width);
 
     overrides.masterGain    = raw (masterGain);
+
+    overrides.engineMode    = raw (engineMode);
 }
 
 //==============================================================================
@@ -393,11 +401,21 @@ void AxiomAudioProcessor::runPipeline()
 
     if (analysisJob.threadShouldExit()) return;
 
+    // --- DDSP control frames (resynthesis layer) ---------------------------------
+    // Same inference engine instance as separation/refinement — the
+    // ddsp_decoder session simply lives alongside the other model slots.
+    pipelineProgress.store (0.9f);
+    auto ddsp = std::make_shared<DdspTimbre> (
+        DdspEncoder::extract (active, sr, features, *inference,
+                              [this] { return analysisJob.threadShouldExit(); }));
+
+    if (analysisJob.threadShouldExit()) return;
+
     juce::WeakReference<AxiomAudioProcessor> weak (this);
-    juce::MessageManager::callAsync ([weak, patch, features, tier]
+    juce::MessageManager::callAsync ([weak, patch, features, tier, ddsp]
     {
         if (weak != nullptr)
-            weak->applyReconstruction (patch, features, tier);
+            weak->applyReconstruction (patch, features, tier, std::move (*ddsp));
     });
 }
 
@@ -435,13 +453,15 @@ void AxiomAudioProcessor::runSeparation()
 //==============================================================================
 void AxiomAudioProcessor::applyReconstruction (const InstrumentPatch& patch,
                                                const AnalysisFeatures& features,
-                                               const juce::String& tier)
+                                               const juce::String& tier,
+                                               DdspTimbre ddspTimbre)
 {
     lastFeatures = features;
     lastTier     = tier;
+    lastDdspTier = ddspTimbre.isValid() ? ddspTimbre.tierName : juce::String();
     presetManager.clearCurrent();             // freshly learned sound is unsaved
 
-    engine.setPatch (patch);
+    engine.setPatch (patch, std::move (ddspTimbre));
     applyPatchToParameters (patch);
 
     stage.store (PipelineStage::Ready);
@@ -572,10 +592,14 @@ axiom::InstrumentPatch AxiomAudioProcessor::getCurrentPatchWithOverrides() const
 
 void AxiomAudioProcessor::loadPresetAtIndex (int index)
 {
-    if (auto patch = presetManager.loadPreset (index))
+    if (auto preset = presetManager.loadPreset (index))
     {
-        engine.setPatch (*patch);
-        applyPatchToParameters (*patch);
+        // The preset defines the whole sound: its DDSP layer replaces the
+        // current one (or clears it when the preset never carried frames).
+        lastDdspTier = preset->ddsp.isValid() ? preset->ddsp.tierName : juce::String();
+        const auto patch = preset->patch;
+        engine.setPatch (patch, std::move (preset->ddsp));
+        applyPatchToParameters (patch);
         // Snapshot through the same param round-trip used by isPresetDirty(),
         // so float quantization can't produce a false "edited" state.
         presetSnapshotJson = patch_io::toJson (getCurrentPatchWithOverrides());
@@ -600,10 +624,11 @@ void AxiomAudioProcessor::navigatePreset (int delta)
 
 juce::Result AxiomAudioProcessor::savePresetAs (const juce::String& name)
 {
-    // Save the sound as heard: knob edits are part of the preset.
+    // Save the sound as heard: knob edits are part of the preset, and so is
+    // the DDSP resynthesis layer.
     const auto effective = getCurrentPatchWithOverrides();
 
-    auto result = presetManager.savePreset (name, effective);
+    auto result = presetManager.savePreset (name, effective, &engine.getDdspTimbre());
     if (result.wasOk())
     {
         engine.setPatch (effective);          // base patch now matches the file
@@ -627,7 +652,7 @@ void AxiomAudioProcessor::updateCurrentPreset()
         return;
 
     const auto effective = getCurrentPatchWithOverrides();
-    if (presetManager.savePreset (name, effective).wasOk())
+    if (presetManager.savePreset (name, effective, &engine.getDdspTimbre()).wasOk())
     {
         engine.setPatch (effective);
         presetSnapshotJson = patch_io::toJson (getCurrentPatchWithOverrides());
@@ -716,6 +741,12 @@ void AxiomAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     root.setProperty ("samplePath", sampleFile.getFullPathName(), nullptr);
     root.setProperty ("tier",       lastTier, nullptr);
     root.setProperty ("presetName", presetManager.getCurrentName(), nullptr);
+
+    // DDSP frames are derived from the source audio, which is NOT re-analyzed
+    // on restore — persist them so a reopened project keeps the resynthesis
+    // layer (binary blob, ~0.5 MB worst case; hosts handle MB-scale state).
+    if (const auto& ddsp = engine.getDdspTimbre(); ddsp.isValid())
+        root.setProperty ("ddspTimbre", juce::var (ddsp.toMemoryBlock()), nullptr);
     {
         const juce::ScopedLock sl (dataLock);
         root.setProperty ("zoneStart",   zone.startSec, nullptr);
@@ -738,9 +769,15 @@ void AxiomAudioProcessor::setStateInformation (const void* data, int sizeInBytes
     if (auto params = root.getChildWithName (apvts.state.getType()); params.isValid())
         apvts.replaceState (params);
 
+    DdspTimbre ddsp;
+    if (auto* block = root.getProperty ("ddspTimbre").getBinaryData())
+        if (auto parsed = DdspTimbre::fromMemoryBlock (block->getData(), block->getSize()))
+            ddsp = std::move (*parsed);
+    lastDdspTier = ddsp.isValid() ? ddsp.tierName : juce::String();
+
     if (auto patch = patch_io::fromJson (root.getProperty ("patchJson").toString()))
     {
-        engine.setPatch (*patch);
+        engine.setPatch (*patch, std::move (ddsp));
         stage.store (PipelineStage::Ready);
     }
 

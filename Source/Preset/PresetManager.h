@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "../Core/AppPaths.h"
+#include "../Core/DdspTimbre.h"
 #include "../Core/InstrumentPatch.h"
 
 namespace axiom
@@ -53,10 +54,22 @@ public:
     void clearCurrent() noexcept            { currentIndex = -1; }
     void setCurrentByName (const juce::String& name);
 
-    std::optional<InstrumentPatch> loadPreset (int index);
+    /** A preset is the patch plus (optionally) the DDSP resynthesis frames
+        captured from the source sample — `ddsp` stays default/invalid for
+        presets saved without one. */
+    struct LoadedPreset
+    {
+        InstrumentPatch patch;
+        DdspTimbre      ddsp;
+    };
 
-    /** Saves (or overwrites) `name` and makes it current. */
-    juce::Result savePreset (const juce::String& name, const InstrumentPatch& patch);
+    std::optional<LoadedPreset> loadPreset (int index);
+
+    /** Saves (or overwrites) `name` and makes it current. Pass the current
+        DDSP timbre so "save captures the sound as heard" includes the
+        resynthesis layer (nullptr / invalid = none stored). */
+    juce::Result savePreset (const juce::String& name, const InstrumentPatch& patch,
+                             const DdspTimbre* ddsp = nullptr);
 
     void setFavorite (int index, bool shouldBeFavorite);
     bool deletePreset (int index);
@@ -64,7 +77,8 @@ public:
 private:
     void seedFactoryPresets();
     juce::Result writePresetFile (const juce::File& file, const juce::String& name,
-                                  const InstrumentPatch& patch, bool favorite);
+                                  const InstrumentPatch& patch, bool favorite,
+                                  const DdspTimbre* ddsp = nullptr);
 
     std::vector<PresetInfo> presets;
     int currentIndex = -1;

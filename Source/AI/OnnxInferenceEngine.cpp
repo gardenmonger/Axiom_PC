@@ -28,8 +28,38 @@
  #define AXIOM_HAS_COREML 0
 #endif
 
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#endif
+
 namespace axiom
 {
+
+#if JUCE_WINDOWS
+bool preloadOnnxRuntimeLibrary()
+{
+    static const bool loaded = []
+    {
+        // The build copies onnxruntime.dll next to the plugin binary (inside
+        // the .vst3 bundle) and the standalone exe; hosts never search there
+        // for dependent DLLs, so hand the loader an absolute path before the
+        // delay-loaded first ORT call resolves by name.
+        const auto bundled = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                 .getSiblingFile ("onnxruntime.dll");
+
+        if (bundled.existsAsFile()
+             && ::LoadLibraryW (bundled.getFullPathName().toWideCharPointer()) != nullptr)
+            return true;
+
+        return ::LoadLibraryW (L"onnxruntime.dll") != nullptr;  // PATH / System32 fallback
+    }();
+
+    return loaded;
+}
+#endif
 
 struct OnnxInferenceEngine::Impl
 {
@@ -67,8 +97,14 @@ struct OnnxInferenceEngine::Impl
             catch (...) { providerName = "CPU"; }   // CoreML unsupported for this model
            #endif
 
+            // Ort::Session takes ORTCHAR_T*: wchar_t on Windows, char elsewhere
+           #if JUCE_WINDOWS
+            auto session = std::make_unique<Ort::Session> (
+                env, file.getFullPathName().toWideCharPointer(), options);
+           #else
             auto session = std::make_unique<Ort::Session> (
                 env, file.getFullPathName().toRawUTF8(), options);
+           #endif
 
             auto* raw = session.get();
             sessions[modelName] = std::move (session);

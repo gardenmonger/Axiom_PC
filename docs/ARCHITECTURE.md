@@ -43,8 +43,14 @@ Feature extraction              [Analysis/, analysis thread]
 Reconstruction                  [AI/, analysis thread]
   ├─ AnalyticalReconstructor (tier 1, always available)
   └─ ONNX "patch_refiner" (tier 2, optional, refines tier 1 prior)
-InstrumentPatch  ──(atomic double-buffer)──►  SynthEngine   [audio thread]
-  └─ 16 voices: PolyBLEP oscs → drive → TPT SVF → amp env
+DDSP encoding                   [AI/DdspEncoder, analysis thread]
+  ├─ per-frame harmonic tracking (measured STFT tier, always available)
+  └─ ONNX "ddsp_decoder" (optional: (f0, loudness) frames → harmonics+noise)
+InstrumentPatch + DdspTimbre ──(atomic double-buffer)──► SynthEngine [audio thread]
+  └─ 16 voices, two switchable layers per voice (engineMode: Recipe/DDSP/Both):
+     ├─ recipe: PolyBLEP oscs → drive → TPT SVF → amp env
+     ├─ DDSP:   64-partial additive resynth @ played f0 + filtered noise
+     │          → drive → SVF → transparent gate env
      └─ FX rack: saturation → chorus → delay → reverb → width → gain
 Export                          [Export/, export thread]
   └─ .axiom (JSON) · SFZ + 24-bit WAV multisamples · DecentSampler
@@ -54,10 +60,10 @@ Export                          [Export/, export thread]
 
 | Folder | Contents | Depends on |
 |---|---|---|
-| `Source/Core/` | `InstrumentPatch` (data model + JSON), `AnalysisFeatures`, `ParamIDs` | JUCE only |
+| `Source/Core/` | `InstrumentPatch` (data model + JSON), `DdspTimbre` (DDSP control frames + EngineMode), `AnalysisFeatures`, `ParamIDs` | JUCE only |
 | `Source/Analysis/` | `AudioAnalyzer` (STFT/envelope/stereo), `PitchDetector` (YIN) | Core |
-| `Source/AI/` | `IReconstructor`, `AnalyticalReconstructor`, `HybridReconstructor`, `IInferenceEngine` + ONNX seam, `ModelRegistry`, `IStemSeparator` | Core |
-| `Source/Synth/` | `SynthModules` (PolyBLEP osc, TPT SVF), `Voice`, `SynthEngine`, `EffectsChain` | Core |
+| `Source/AI/` | `IReconstructor`, `AnalyticalReconstructor`, `HybridReconstructor`, `DdspEncoder`, `IInferenceEngine` + ONNX seam, `ModelRegistry`, `IStemSeparator` | Core |
+| `Source/Synth/` | `SynthModules` (PolyBLEP osc, TPT SVF), `DdspResynth` (additive+noise DDSP playback), `Voice`, `SynthEngine`, `EffectsChain` | Core |
 | `Source/Export/` | `InstrumentExporter` (WAV/SFZ/DecentSampler/.axiom) | Core, Synth |
 | `Source/Preset/` | `PresetManager` (file-based presets, favorites, factory seeds) | Core |
 | `Source/GUI/` | `AxiomLookAndFeel`, `WaveformView`, `PatchView` | Core |
@@ -94,6 +100,7 @@ at runtime by `ModelRegistry` — models are replaceable without recompiling):
 |---|---|---|
 | `stem_separator` | full mix → stems, tensor contract `[1,2,T] -> [1,S,2,T]` (Demucs / BS-RoFormer class); optional `stem_separator.json` manifest sets stem names / model rate / chunking | **harness shipped** (chunked inference, triangular crossfade reassembly, resampling); drop the .onnx in the model folder to activate. Until then `StemSeparationEngine` falls back to HPSS median-filter harmonic/percussive separation (Fitzgerald 2010) — separation always works |
 | `patch_refiner` | packed `AnalysisFeatures` (48 floats) → refined synth parameters | I/O spec v1 implemented in `HybridReconstructor`; falls back to analytical tier when absent |
+| `ddsp_decoder` | DDSP control frames, tensor contract `[1,T,2]` (per frame: midiPitch/127, loudness 0..1) → `[1,T,66]` (64 linear harmonic amps, noise gain, noise cutoff 0..1 log-mapped 20 Hz·2^(10x)) | **harness shipped** (`DdspEncoder`); without the model the same frames are measured directly from the source STFT (per-frame f0 refinement → harmonic peak ladder → residual noise gain/rolloff), so DDSP mode always works. Sessions live in the same `OnnxInferenceEngine` as the other slots |
 
 `OnnxInferenceEngine` is live on macOS builds (`AXIOM_ENABLE_ONNX=1`, ONNX Runtime via
 Homebrew, CoreML EP with CPU fallback, sessions cached per model). The Xcode build is
@@ -108,6 +115,20 @@ the message thread into the same double-buffer slot as the patch). Sustained sou
 play through an open filter (the table already embeds the source filtering); percussive
 sounds get a measured brightness-decay sweep. Classification still runs for the
 description and as the fallback when the ladder is unreliable.
+
+**DDSP resynthesis (pitch-stretch tier).** Alongside Patch Discovery, `DdspEncoder`
+extracts a `DdspTimbre` block — up to 2048 harmonic+noise control frames (~93 fps) —
+which `Synth/DdspResynth` re-renders per voice in real time: one shared sine LUT, one
+phase accumulator per partial, per-tick amplitude ramps interpolated from the frame
+pair under a playhead that ping-pongs across the measured sustain region (one-shots
+play straight through). The partial count is capped below Nyquist per control tick, so
+the source timbre stretches to *every key played* — polyphonic, alias-free, no
+inference and no allocation on the audio thread. The `engineMode` parameter (Recipe /
+DDSP / Both, chips in the PatchView) gates the recipe and DDSP layers per voice; each
+layer has its own drive+filter+envelope so Recipe mode stays byte-identical to the
+pre-DDSP engine, and with no timbre loaded the engine falls back to the recipe so keys
+never go silent. The timbre block persists in session state (binary blob) and presets
+(base64 in the `.axiom` JSON — old builds ignore the key).
 
 **Patch Discovery (the differentiator).** Reconstruction output is not audio — it is an
 editable synthesis recipe with a natural-language description
@@ -150,6 +171,11 @@ DirectML (Windows), CUDA, CPU fallback — selected at session creation in
 **Patch handoff**: `InstrumentPatch` is trivially copyable (~600 B). Two-slot buffer +
 `std::atomic<int>` index; message thread writes the inactive slot then flips
 (release-store), audio thread reads the active slot once per block (acquire-load).
+The heap-backed `DdspTimbre` block (up to ~0.5 MB of control frames) rides in a
+parallel slot pair guarded by the same index, so patch, spectral wavetables and DDSP
+frames always swap together; plain `setPatch(patch)` copies the current timbre across
+(knob edits and preset saves never drop the resynthesis layer), while
+`setPatch(patch, timbre)` replaces it.
 Updates are rare (reconstruction/state-restore); continuous edits flow through APVTS raw
 atomic floats (`RuntimeOverrides`) merged over the patch at block start — voices hear
 knob changes on held notes, offline renders hear the pure patch.
@@ -184,7 +210,8 @@ samples; per-sample work is oscillator ticks, SVF, and amp envelope only.
 
 ## 8. Parameters & state
 
-29 host-automatable parameters (stable string IDs in `Core/ParamIDs.h`; never rename).
+30 host-automatable parameters (stable string IDs in `Core/ParamIDs.h`; never rename —
+`engineMode` is the Recipe/DDSP/Both engine selector).
 Presets: `PresetManager` stores each preset as an `.axiom` JSON file (patch + presetName /
 favorite / createdAt metadata) under the per-user data root (`Core/AppPaths.h` — note
 JUCE's `userApplicationDataDirectory` is `~/Library` on macOS, so AppPaths adds

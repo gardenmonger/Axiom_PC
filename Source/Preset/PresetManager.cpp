@@ -64,20 +64,29 @@ void PresetManager::setCurrentByName (const juce::String& name)
 }
 
 //==============================================================================
-std::optional<InstrumentPatch> PresetManager::loadPreset (int index)
+std::optional<PresetManager::LoadedPreset> PresetManager::loadPreset (int index)
 {
     if (index < 0 || index >= (int) presets.size())
         return std::nullopt;
 
-    auto patch = patch_io::fromJson (presets[(size_t) index].file.loadFileAsString());
-    if (! patch.has_value())
+    const auto parsed = juce::JSON::parse (presets[(size_t) index].file.loadFileAsString());
+    if (! parsed.isObject())
         return std::nullopt;
 
+    LoadedPreset preset;
+    preset.patch = patch_io::fromVar (parsed);
+
+    // Optional DDSP layer; absent (or corrupt) leaves an invalid timbre,
+    // which the engine treats as "recipe only".
+    if (auto ddsp = DdspTimbre::fromBase64 (parsed.getProperty ("ddspTimbre", {}).toString()))
+        preset.ddsp = std::move (*ddsp);
+
     currentIndex = index;
-    return patch;
+    return preset;
 }
 
-juce::Result PresetManager::savePreset (const juce::String& name, const InstrumentPatch& patch)
+juce::Result PresetManager::savePreset (const juce::String& name, const InstrumentPatch& patch,
+                                        const DdspTimbre* ddsp)
 {
     const auto trimmed = name.trim();
     if (trimmed.isEmpty())
@@ -91,7 +100,7 @@ juce::Result PresetManager::savePreset (const juce::String& name, const Instrume
     if (file.existsAsFile())
         favorite = (bool) juce::JSON::parse (file.loadFileAsString()).getProperty ("favorite", false);
 
-    if (auto result = writePresetFile (file, trimmed, patch, favorite); result.failed())
+    if (auto result = writePresetFile (file, trimmed, patch, favorite, ddsp); result.failed())
         return result;
 
     rescan();
@@ -135,7 +144,8 @@ bool PresetManager::deletePreset (int index)
 
 //==============================================================================
 juce::Result PresetManager::writePresetFile (const juce::File& file, const juce::String& name,
-                                             const InstrumentPatch& patch, bool favorite)
+                                             const InstrumentPatch& patch, bool favorite,
+                                             const DdspTimbre* ddsp)
 {
     auto v = patch_io::toVar (patch);
     if (auto* obj = v.getDynamicObject())
@@ -143,6 +153,11 @@ juce::Result PresetManager::writePresetFile (const juce::File& file, const juce:
         obj->setProperty ("presetName", name);
         obj->setProperty ("favorite", favorite);
         obj->setProperty ("createdAt", juce::Time::getCurrentTime().toISO8601 (true));
+
+        // DDSP frames ride along as base64 so the preset reproduces the
+        // resynthesis layer; old builds simply ignore the extra key.
+        if (ddsp != nullptr && ddsp->isValid())
+            obj->setProperty ("ddspTimbre", ddsp->toBase64());
     }
 
     if (! file.replaceWithText (juce::JSON::toString (v, false)))

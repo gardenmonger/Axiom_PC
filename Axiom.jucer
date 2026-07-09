@@ -14,6 +14,7 @@
         <FILE id="CoreAF1" name="AnalysisFeatures.h" compile="0" resource="0"
               file="Source/Core/AnalysisFeatures.h"/>
         <FILE id="CoreAZ1" name="AudioZone.h" compile="0" resource="0" file="Source/Core/AudioZone.h"/>
+        <FILE id="CoreDT1" name="DdspTimbre.h" compile="0" resource="0" file="Source/Core/DdspTimbre.h"/>
         <FILE id="CoreIP1" name="InstrumentPatch.h" compile="0" resource="0"
               file="Source/Core/InstrumentPatch.h"/>
         <FILE id="CorePI1" name="ParamIDs.h" compile="0" resource="0" file="Source/Core/ParamIDs.h"/>
@@ -29,30 +30,29 @@
               file="Source/Analysis/PitchDetector.cpp"/>
       </GROUP>
       <GROUP id="{A1000003-0000-0000-0000-000000000003}" name="AI">
+        <FILE id="AiDE1h" name="DdspEncoder.h" compile="0" resource="0" file="Source/AI/DdspEncoder.h"/>
+        <FILE id="AiDE1c" name="DdspEncoder.cpp" compile="1" resource="0"
+              file="Source/AI/DdspEncoder.cpp"/>
         <FILE id="AiIE1h" name="InferenceEngine.h" compile="0" resource="0"
               file="Source/AI/InferenceEngine.h"/>
         <FILE id="AiOE1c" name="OnnxInferenceEngine.cpp" compile="1" resource="0"
               file="Source/AI/OnnxInferenceEngine.cpp"/>
-        <FILE id="AiRC1h" name="Reconstructor.h" compile="0" resource="0"
-              file="Source/AI/Reconstructor.h"/>
+        <FILE id="AiRC1h" name="Reconstructor.h" compile="0" resource="0" file="Source/AI/Reconstructor.h"/>
         <FILE id="AiRC1c" name="Reconstructor.cpp" compile="1" resource="0"
               file="Source/AI/Reconstructor.cpp"/>
         <FILE id="AiSN1h" name="StemSeparation.h" compile="0" resource="0"
               file="Source/AI/StemSeparation.h"/>
         <FILE id="AiSN1c" name="StemSeparation.cpp" compile="1" resource="0"
               file="Source/AI/StemSeparation.cpp"/>
-        <FILE id="AiSS1h" name="StemSeparator.h" compile="0" resource="0"
-              file="Source/AI/StemSeparator.h"/>
+        <FILE id="AiSS1h" name="StemSeparator.h" compile="0" resource="0" file="Source/AI/StemSeparator.h"/>
       </GROUP>
       <GROUP id="{A1000004-0000-0000-0000-000000000004}" name="Synth">
+        <FILE id="SynDR1h" name="DdspResynth.h" compile="0" resource="0" file="Source/Synth/DdspResynth.h"/>
         <FILE id="SynWT1h" name="Wavetable.h" compile="0" resource="0" file="Source/Synth/Wavetable.h"/>
-        <FILE id="SynSM1h" name="SynthModules.h" compile="0" resource="0"
-              file="Source/Synth/SynthModules.h"/>
+        <FILE id="SynSM1h" name="SynthModules.h" compile="0" resource="0" file="Source/Synth/SynthModules.h"/>
         <FILE id="SynVo1h" name="Voice.h" compile="0" resource="0" file="Source/Synth/Voice.h"/>
-        <FILE id="SynEC1h" name="EffectsChain.h" compile="0" resource="0"
-              file="Source/Synth/EffectsChain.h"/>
-        <FILE id="SynSE1h" name="SynthEngine.h" compile="0" resource="0"
-              file="Source/Synth/SynthEngine.h"/>
+        <FILE id="SynEC1h" name="EffectsChain.h" compile="0" resource="0" file="Source/Synth/EffectsChain.h"/>
+        <FILE id="SynSE1h" name="SynthEngine.h" compile="0" resource="0" file="Source/Synth/SynthEngine.h"/>
         <FILE id="SynSE1c" name="SynthEngine.cpp" compile="1" resource="0"
               file="Source/Synth/SynthEngine.cpp"/>
       </GROUP>
@@ -77,16 +77,13 @@
               file="Source/GUI/EmbeddingSphereView.h"/>
         <FILE id="GuiES1c" name="EmbeddingSphereView.cpp" compile="1" resource="0"
               file="Source/GUI/EmbeddingSphereView.cpp"/>
-        <FILE id="GuiWV1h" name="WaveformView.h" compile="0" resource="0"
-              file="Source/GUI/WaveformView.h"/>
+        <FILE id="GuiWV1h" name="WaveformView.h" compile="0" resource="0" file="Source/GUI/WaveformView.h"/>
         <FILE id="GuiWV1c" name="WaveformView.cpp" compile="1" resource="0"
               file="Source/GUI/WaveformView.cpp"/>
         <FILE id="GuiPV1h" name="PatchView.h" compile="0" resource="0" file="Source/GUI/PatchView.h"/>
-        <FILE id="GuiPV1c" name="PatchView.cpp" compile="1" resource="0"
-              file="Source/GUI/PatchView.cpp"/>
+        <FILE id="GuiPV1c" name="PatchView.cpp" compile="1" resource="0" file="Source/GUI/PatchView.cpp"/>
         <FILE id="GuiPB1h" name="PresetBar.h" compile="0" resource="0" file="Source/GUI/PresetBar.h"/>
-        <FILE id="GuiPB1c" name="PresetBar.cpp" compile="1" resource="0"
-              file="Source/GUI/PresetBar.cpp"/>
+        <FILE id="GuiPB1c" name="PresetBar.cpp" compile="1" resource="0" file="Source/GUI/PresetBar.cpp"/>
       </GROUP>
       <FILE id="pO87mD" name="PluginProcessor.cpp" compile="1" resource="0"
             file="Source/PluginProcessor.cpp"/>
@@ -118,12 +115,18 @@
         <MODULEPATH id="juce_graphics" path="../../JUCE/modules"/>
         <MODULEPATH id="juce_gui_basics" path="../../JUCE/modules"/>
         <MODULEPATH id="juce_gui_extra" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../JUCE/modules"/>
       </MODULEPATHS>
     </LINUX_MAKE>
-    <VS2022 targetFolder="Builds/VisualStudio2022">
+    <VS2022 targetFolder="Builds/VisualStudio2022" toolset="v145" extraDefs="AXIOM_ENABLE_ONNX=1"
+            externalLibraries="onnxruntime.lib;delayimp.lib" extraLinkerFlags="/DELAYLOAD:onnxruntime.dll">
       <CONFIGURATIONS>
-        <CONFIGURATION isDebug="1" name="Debug" targetName="Axiom"/>
-        <CONFIGURATION isDebug="0" name="Release" targetName="Axiom"/>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Axiom" headerPath="C:\Users\zerkWyd\Documents\onnxruntime\include"
+                       libraryPath="C:\Users\zerkWyd\Documents\onnxruntime\lib"
+                       postbuildCommand="if &quot;$(ProjectName)&quot;==&quot;Axiom_StandalonePlugin&quot; copy /Y &quot;C:\Users\zerkWyd\Documents\onnxruntime\lib\onnxruntime.dll&quot; &quot;$(OutDir)onnxruntime.dll&quot;&#10;if &quot;$(ProjectName)&quot;==&quot;Axiom_VST3&quot; if not exist &quot;$(OutDir)Axiom.vst3\Contents\x86_64-win\&quot; mkdir &quot;$(OutDir)Axiom.vst3\Contents\x86_64-win&quot;&#10;if &quot;$(ProjectName)&quot;==&quot;Axiom_VST3&quot; copy /Y &quot;C:\Users\zerkWyd\Documents\onnxruntime\lib\onnxruntime.dll&quot; &quot;$(OutDir)Axiom.vst3\Contents\x86_64-win\onnxruntime.dll&quot;"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Axiom" headerPath="C:\Users\zerkWyd\Documents\onnxruntime\include"
+                       libraryPath="C:\Users\zerkWyd\Documents\onnxruntime\lib"
+                       postbuildCommand="if &quot;$(ProjectName)&quot;==&quot;Axiom_StandalonePlugin&quot; copy /Y &quot;C:\Users\zerkWyd\Documents\onnxruntime\lib\onnxruntime.dll&quot; &quot;$(OutDir)onnxruntime.dll&quot;&#10;if &quot;$(ProjectName)&quot;==&quot;Axiom_VST3&quot; if not exist &quot;$(OutDir)Axiom.vst3\Contents\x86_64-win\&quot; mkdir &quot;$(OutDir)Axiom.vst3\Contents\x86_64-win&quot;&#10;if &quot;$(ProjectName)&quot;==&quot;Axiom_VST3&quot; copy /Y &quot;C:\Users\zerkWyd\Documents\onnxruntime\lib\onnxruntime.dll&quot; &quot;$(OutDir)Axiom.vst3\Contents\x86_64-win\onnxruntime.dll&quot;"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_audio_basics" path="../../JUCE/modules"/>
@@ -139,17 +142,16 @@
         <MODULEPATH id="juce_graphics" path="../../JUCE/modules"/>
         <MODULEPATH id="juce_gui_basics" path="../../JUCE/modules"/>
         <MODULEPATH id="juce_gui_extra" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../JUCE/modules"/>
       </MODULEPATHS>
     </VS2022>
     <XCODE_MAC targetFolder="Builds/MacOSX" extraDefs="AXIOM_ENABLE_ONNX=1"
                externalLibraries="onnxruntime">
       <CONFIGURATIONS>
         <CONFIGURATION isDebug="1" name="Debug" targetName="Axiom" osxArchitecture="Native"
-                       headerPath="/usr/local/opt/onnxruntime/include/onnxruntime"
-                       libraryPath="/usr/local/opt/onnxruntime/lib"/>
+                       headerPath="/usr/local/opt/onnxruntime/include/onnxruntime" libraryPath="/usr/local/opt/onnxruntime/lib"/>
         <CONFIGURATION isDebug="0" name="Release" targetName="Axiom" osxArchitecture="Native"
-                       headerPath="/usr/local/opt/onnxruntime/include/onnxruntime"
-                       libraryPath="/usr/local/opt/onnxruntime/lib"/>
+                       headerPath="/usr/local/opt/onnxruntime/include/onnxruntime" libraryPath="/usr/local/opt/onnxruntime/lib"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_audio_basics" path="../../JUCE/modules"/>
@@ -165,6 +167,7 @@
         <MODULEPATH id="juce_graphics" path="../../JUCE/modules"/>
         <MODULEPATH id="juce_gui_basics" path="../../JUCE/modules"/>
         <MODULEPATH id="juce_gui_extra" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../JUCE/modules"/>
       </MODULEPATHS>
     </XCODE_MAC>
   </EXPORTFORMATS>
@@ -175,6 +178,8 @@
     <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0"
             useGlobalPath="1"/>
     <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_processors_headless" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="1"/>
     <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
     <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
     <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>

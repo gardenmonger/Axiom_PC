@@ -140,8 +140,14 @@ void AxiomAudioProcessorEditor::refreshFromProcessor()
         waveformView.setFileAudio (processor.getCurrentSampleFile());
     waveformView.setZone (processor.getZone());
 
-    // Patch + constellation.
-    patchView.setPatchInfo (processor.getCurrentPatch(), processor.getReconstructionTier());
+    // Patch + constellation. Tier shows both engines when a DDSP layer is
+    // loaded ("Analytical DSP v1 + DDSP measured (STFT)").
+    {
+        auto tier = processor.getReconstructionTier();
+        if (const auto ddspTier = processor.getDdspTierName(); ddspTier.isNotEmpty())
+            tier += (tier.isNotEmpty() ? " + " : "") + ddspTier;
+        patchView.setPatchInfo (processor.getCurrentPatch(), tier);
+    }
     if (processor.getStage() == AxiomAudioProcessor::PipelineStage::Ready
         && processor.getLastFeatures().isValid())
         sphereView.setFeatures (processor.getLastFeatures(), processor.getCurrentPatch());
@@ -252,7 +258,10 @@ void AxiomAudioProcessorEditor::updateStatusStrip()
                                                   axiom::SynthEngine::maxVoices,
                                                   block, sr / 1000.0, ms)
                              + "AI: " + processor.getAiBackendName()
-                             + "      Separation: " + processor.getSeparationBackendName(),
+                             + "      Separation: " + processor.getSeparationBackendName()
+                             + "      DDSP: " + (processor.getDdspTierName().isNotEmpty()
+                                                     ? processor.getDdspTierName()
+                                                     : juce::String ("none")),
                          juce::dontSendNotification);
 }
 

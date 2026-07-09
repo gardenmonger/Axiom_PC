@@ -36,6 +36,7 @@
 
 #include "Core/AnalysisFeatures.h"
 #include "Core/AudioZone.h"
+#include "Core/DdspTimbre.h"
 #include "Core/InstrumentPatch.h"
 #include "AI/InferenceEngine.h"
 #include "AI/Reconstructor.h"
@@ -117,6 +118,10 @@ public:
     juce::String getAiBackendName() const                  { return inference->getBackendName(); }
     juce::String getSeparationBackendName() const;
 
+    /** Tier of the current DDSP timbre ("DDSP neural (ONNX)" / "DDSP
+        measured (STFT)"), or empty when no resynthesis layer is loaded. */
+    juce::String getDdspTierName() const                   { return lastDdspTier; }
+
     //==============================================================================
     // Presets (message-thread API for the editor)
     //==============================================================================
@@ -189,7 +194,8 @@ private:
     void postFailure (const juce::String& why);
     void applyReconstruction (const axiom::InstrumentPatch& patch,
                               const axiom::AnalysisFeatures& features,
-                              const juce::String& tier);    // message thread
+                              const juce::String& tier,
+                              axiom::DdspTimbre ddspTimbre); // message thread
     void applyStems (std::vector<axiom::Stem>&& stems);     // message thread
     void applyPatchToParameters (const axiom::InstrumentPatch& patch);
     void wireOverrides();
@@ -224,6 +230,7 @@ private:
     juce::File              sampleFile;
     axiom::AnalysisFeatures lastFeatures;
     juce::String            lastTier;
+    juce::String            lastDdspTier;         // empty = no DDSP layer loaded
     juce::String            presetSnapshotJson;   // effective patch at preset load/save
 
     std::atomic<PipelineStage> stage { PipelineStage::Empty };

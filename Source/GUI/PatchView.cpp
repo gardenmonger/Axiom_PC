@@ -14,6 +14,35 @@ PatchView::PatchView (juce::AudioProcessorValueTreeState& apvts)
 {
     using namespace params;
 
+    // Engine selector chips (RECIPE / DDSP / BOTH -> engineMode choices).
+    {
+        const char* modeNames[] = { "RECIPE", "DDSP", "BOTH" };
+        for (int i = 0; i < 3; ++i)
+        {
+            auto& b = modeButtons[(size_t) i];
+            b.setButtonText (modeNames[i]);
+            b.onClick = [this, i]
+            {
+                if (modeAttachment != nullptr)
+                    modeAttachment->setValueAsCompleteGesture ((float) i);
+            };
+            addAndMakeVisible (b);
+        }
+
+        if (auto* param = apvts.getParameter (engineMode))
+        {
+            modeAttachment = std::make_unique<juce::ParameterAttachment> (
+                *param, [this] (float value)
+                {
+                    const int mode = juce::jlimit (0, 2, (int) std::lround (value));
+                    for (int i = 0; i < 3; ++i)
+                        modeButtons[(size_t) i].setToggleState (i == mode,
+                                                                juce::dontSendNotification);
+                });
+            modeAttachment->sendInitialUpdate();
+        }
+    }
+
     // Row 1 — FILTER
     addKnob (apvts, cutoff,       "Cutoff");
     addKnob (apvts, resonance,    "Reso");
@@ -151,6 +180,14 @@ void PatchView::paint (juce::Graphics& g)
         }
     }
 
+    // Engine mode caption (the chips are child components).
+    {
+        auto row = area.removeFromTop (26);
+        g.setColour (palette::textDim.withAlpha (0.85f));
+        g.setFont (juce::Font (juce::FontOptions (10.5f)).boldened());
+        g.drawText ("ENGINE", row.removeFromLeft (52), juce::Justification::centredLeft);
+    }
+
     // Row captions above each knob row.
     g.setFont (juce::Font (juce::FontOptions (10.5f)).boldened());
     for (int rowIdx = 0; rowIdx < numRows; ++rowIdx)
@@ -169,7 +206,19 @@ void PatchView::paint (juce::Graphics& g)
 void PatchView::resized()
 {
     auto area = getLocalBounds().reduced (16, 12);
-    area.removeFromTop (22 + 34 + 16 + 6 + 30 + 4);   // header stack (mirrors paint)
+    area.removeFromTop (22 + 34 + 16 + 6 + 30);       // header stack (mirrors paint)
+
+    // Engine mode chips share the caption row painted above.
+    {
+        auto row = area.removeFromTop (26);
+        row.removeFromLeft (52);                       // "ENGINE" caption
+        row = row.reduced (0, 1);
+        const int cell = row.getWidth() / 3;
+        for (auto& b : modeButtons)
+            b.setBounds (row.removeFromLeft (cell).reduced (3, 0));
+    }
+
+    area.removeFromTop (4);
 
     const int rowHeight = juce::jmax (58, area.getHeight() / numRows);
 

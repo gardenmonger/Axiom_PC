@@ -15,7 +15,10 @@
         copyable) is written into the inactive slot of a two-slot buffer,
         then the slot index is flipped atomically. The caller (PluginProcessor)
         coalesces updates to at most one per timer tick, so a slot is never
-        rewritten while the audio thread could still be reading it.
+        rewritten while the audio thread could still be reading it. The DDSP
+        timbre block (heap-backed control frames, see Core/DdspTimbre.h)
+        rides in a parallel slot pair guarded by the same index flip, so
+        patch, wavetables and timbre always swap together.
       - Continuous user/host parameters (cutoff, ADSR, FX sends…) arrive
         through RuntimeOverrides: raw atomic floats owned by the APVTS,
         merged over the patch at block start. Offline rendering passes no
@@ -33,6 +36,7 @@
 #include "Voice.h"
 #include "EffectsChain.h"
 #include "../Core/InstrumentPatch.h"
+#include "../Core/DdspTimbre.h"
 
 namespace axiom
 {
@@ -76,6 +80,9 @@ struct RuntimeOverrides
     std::atomic<float>* width         = nullptr;
 
     std::atomic<float>* masterGain    = nullptr;
+
+    /** EngineMode choice index (Recipe / DDSP / Both). */
+    std::atomic<float>* engineMode    = nullptr;
 };
 
 //==============================================================================
@@ -87,11 +94,22 @@ public:
     void prepare (double sampleRate, int maxBlockSize);
     void releaseResources();
 
-    /** Message thread. Copies the patch into the inactive slot and flips. */
-    void setPatch (const InstrumentPatch& newPatch) noexcept;
+    /** Message thread. Copies the patch into the inactive slot and flips.
+        The current DDSP timbre is carried over unchanged (knob edits and
+        preset saves must not drop the resynthesis layer). */
+    void setPatch (const InstrumentPatch& newPatch);
+
+    /** Message thread. Installs a patch AND a new DDSP timbre block in one
+        atomic flip (pass a default-constructed timbre to clear the layer —
+        e.g. a preset that never carried one). */
+    void setPatch (const InstrumentPatch& newPatch, DdspTimbre newTimbre);
 
     /** Returns a copy of the patch the audio thread currently plays. */
     InstrumentPatch getPatch() const noexcept;
+
+    /** Message thread only: the active DDSP timbre (for state/preset
+        serialization). The reference is invalidated by the next setPatch. */
+    const DdspTimbre& getDdspTimbre() const noexcept;
 
     void setOverrides (const RuntimeOverrides* o) noexcept   { overrides = o; }
 
@@ -122,16 +140,24 @@ private:
     EffectsChain fx;
 
     // Two-slot lock-free patch handoff (see header comment). Spectral
-    // wavetables are built into the matching slot before the index flips,
-    // so patch and tables always swap together.
+    // wavetables and the DDSP timbre are built into the matching slot
+    // before the index flips, so patch, tables and timbre swap together.
     std::array<InstrumentPatch, 2>     patchSlots;
     std::array<dsp::WavetableSet, 2>   tableSlots;
+    std::array<DdspTimbre, 2>          ddspSlots;
     std::atomic<int> activePatchSlot { 0 };
+
+    /** Writes patch + wavetables into the inactive slot and returns its
+        index; callers fill the matching ddsp slot, then flip. */
+    int prepareInactiveSlot (const InstrumentPatch& newPatch);
 
     // Effective (patch + overrides) + tables for the current block; audio
     // thread only, refreshed from a single slot-index load per block.
     InstrumentPatch effective;
     const dsp::WavetableSet* currentTables = nullptr;
+    const DdspTimbre*        currentTimbre = nullptr;
+    bool recipeOn = true;
+    bool ddspOn   = false;
 
     const RuntimeOverrides* overrides = nullptr;
 

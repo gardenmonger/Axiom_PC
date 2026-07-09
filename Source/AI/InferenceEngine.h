@@ -14,10 +14,14 @@
          fully functional on machines without the runtime.
       3. Everything is offline. No network access, no Python.
 
-    Planned model slots (see docs/ARCHITECTURE.md):
+    Model slots (see docs/ARCHITECTURE.md):
       - "stem_separator"    : song -> vocals/drums/bass/synth/other stems
       - "patch_refiner"     : AnalysisFeatures + mel patches -> InstrumentPatch
                               parameter refinement (Neural Patch Discovery)
+      - "ddsp_decoder"      : per-frame (pitch, loudness) -> harmonic
+                              distribution + noise for the DDSP resynthesis
+                              layer (AI/DdspEncoder.h documents the tensor
+                              contract; measured-STFT fallback without it)
 
     Execution providers when AXIOM_ENABLE_ONNX is on: CoreML (macOS),
     DirectML (Windows), CUDA (Linux/Windows), CPU fallback everywhere.
@@ -94,6 +98,15 @@ public:
 };
 
 #if AXIOM_ENABLE_ONNX
+#if JUCE_WINDOWS
+/** onnxruntime.dll is delay-loaded on Windows so the plugin can always be
+    scanned by a host even when the runtime is absent. This resolves the DLL
+    before the first ORT call, preferring the copy shipped next to the plugin
+    binary / standalone exe (hosts don't search the plugin's own directory for
+    dependent DLLs). Returns false when no runtime could be loaded. */
+bool preloadOnnxRuntimeLibrary();
+#endif
+
 /** ONNX Runtime backed engine. Sessions are created lazily per model and
     cached; execution provider preference: CoreML > CUDA > DirectML > CPU. */
 class OnnxInferenceEngine final : public IInferenceEngine
@@ -119,6 +132,10 @@ private:
 inline std::unique_ptr<IInferenceEngine> createInferenceEngine()
 {
    #if AXIOM_ENABLE_ONNX
+    #if JUCE_WINDOWS
+     if (! preloadOnnxRuntimeLibrary())
+         return std::make_unique<NullInferenceEngine>();
+    #endif
     return std::make_unique<OnnxInferenceEngine>();
    #else
     return std::make_unique<NullInferenceEngine>();

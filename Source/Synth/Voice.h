@@ -9,6 +9,13 @@
     sub-blocks); sample-rate work is limited to oscillator ticks, the filter
     and the amp envelope.
 
+    A second, independently-gated DDSP layer (DdspResynth) can render in
+    parallel or instead of the recipe oscillators: the source sample's
+    harmonic+noise frames re-pitched to this voice's note. It shares the
+    voice's pitch modulation (glide, bend, vibrato) and filter settings but
+    runs through its own drive/filter/envelope so layering the two engines
+    never colours the classic recipe path.
+
     Voices are owned by SynthEngine in a fixed array — no allocation at
     note-on. The patch is passed by const reference each block; a voice
     latches oscillator configuration at startNote() and tracks continuous
@@ -22,7 +29,9 @@
 
 #include <JuceHeader.h>
 #include "SynthModules.h"
+#include "DdspResynth.h"
 #include "../Core/InstrumentPatch.h"
+#include "../Core/DdspTimbre.h"
 
 namespace axiom
 {
@@ -37,6 +46,7 @@ public:
         sr = sampleRate;
         ampEnv.setSampleRate (sampleRate);
         filterEnv.setSampleRate (sampleRate);
+        ddspEnv.setSampleRate (sampleRate);
         reset();
     }
 
@@ -49,6 +59,8 @@ public:
         hasPendingNote = false;
         filtL.reset();
         filtR.reset();
+        ddsp.reset();
+        ddspFilt.reset();
     }
 
     void startNote (int midiNote, float vel, const InstrumentPatch& patch,
@@ -69,6 +81,8 @@ public:
 
         filtL.reset();
         filtR.reset();
+        ddsp.reset();
+        ddspFilt.reset();
 
         targetHz  = dsp::midiToHz ((float) midiNote);
         currentHz = (patch.glideMs > 1.0f && glideFromHz > 0.0f) ? glideFromHz : targetHz;
@@ -76,8 +90,10 @@ public:
         updateEnvelopeParams (patch);
         ampEnv.reset();                  // attack from silence: juce::ADSR
         filterEnv.reset();               // otherwise ramps from its old level
+        ddspEnv.reset();
         ampEnv.noteOn();
         filterEnv.noteOn();
+        ddspEnv.noteOn();
 
         lfoPhase = 0.0f;
         samplesUntilControl = 0;
@@ -113,6 +129,7 @@ public:
         {
             ampEnv.noteOff();
             filterEnv.noteOff();
+            ddspEnv.noteOff();
         }
         else
         {
@@ -128,10 +145,13 @@ public:
 
     /** Additively renders `numSamples` into outL/outR. `bendSemis` is the
         engine-wide pitch-bend offset; `tables` backs OscType::Harmonic.
+        `timbre`/`recipeOn`/`ddspOn` select the engine layers (see
+        SynthEngine — DDSP is only enabled with a valid timbre).
         Returns false when the voice finished its release during this block. */
     bool render (float* outL, float* outR, int numSamples,
                  const InstrumentPatch& patch, float bendSemis,
-                 const dsp::WavetableSet* tables) noexcept
+                 const dsp::WavetableSet* tables,
+                 const DdspTimbre* timbre, bool recipeOn, bool ddspOn) noexcept
     {
         if (! active)
             return false;
@@ -139,6 +159,9 @@ public:
         updateEnvelopeParams (patch);
 
         const float lfoInc = patch.lfo.rateHz / (float) sr;
+
+        // Both layers live: pull each back so the sum keeps chord headroom.
+        const float layerScale = (recipeOn && ddspOn) ? 0.7f : 1.0f;
 
         // Recomputed in the control-rate update as well: a steal-fade can
         // restart the voice mid-block with a new velocity.
@@ -193,6 +216,17 @@ public:
 
                 filtL.setParams (cutoff, patch.filter.resonance, sr);
                 filtR.setParams (cutoff, patch.filter.resonance, sr);
+
+                if (ddspOn)
+                {
+                    // Same pitch modulation as the oscillators (glide, bend,
+                    // vibrato), same modulated filter — the DDSP layer just
+                    // owns a private filter instance so per-layer envelopes
+                    // stay independent.
+                    const float ddspHz = currentHz * dsp::centsToRatio (pitchCents);
+                    ddsp.controlUpdate (*timbre, ddspHz, sr, controlInterval);
+                    ddspFilt.setParams (cutoff, patch.filter.resonance, sr);
+                }
             }
 
             // ---- Sample-rate segment -------------------------------------
@@ -203,31 +237,34 @@ public:
             {
                 float l = 0.0f, r = 0.0f;
 
-                for (size_t s = 0; s < patch.oscs.size(); ++s)
+                if (recipeOn)
                 {
-                    const auto& slot = patch.oscs[s];
-                    if (! slot.enabled) continue;
-                    float ol, or_;
-                    oscs[s].renderSample (slot.type, slot.pulseWidth,
-                                          slot.stereoSpread, noise, tables, ol, or_);
-
-                    // Non-supersaw slots with spread pan by detune sign, so a
-                    // detuned spectral pair opens into a stereo image.
-                    float gl = 1.0f, gr = 1.0f;
-                    if (slot.stereoSpread > 0.01f && slot.type != OscType::Supersaw)
+                    for (size_t s = 0; s < patch.oscs.size(); ++s)
                     {
-                        const float pan = (slot.detuneCents < 0.0f ? -1.0f : 1.0f)
-                                          * slot.stereoSpread;
-                        gl = pan <= 0.0f ? 1.0f : 1.0f - pan;
-                        gr = pan >= 0.0f ? 1.0f : 1.0f + pan;
+                        const auto& slot = patch.oscs[s];
+                        if (! slot.enabled) continue;
+                        float ol, or_;
+                        oscs[s].renderSample (slot.type, slot.pulseWidth,
+                                              slot.stereoSpread, noise, tables, ol, or_);
+
+                        // Non-supersaw slots with spread pan by detune sign, so a
+                        // detuned spectral pair opens into a stereo image.
+                        float gl = 1.0f, gr = 1.0f;
+                        if (slot.stereoSpread > 0.01f && slot.type != OscType::Supersaw)
+                        {
+                            const float pan = (slot.detuneCents < 0.0f ? -1.0f : 1.0f)
+                                              * slot.stereoSpread;
+                            gl = pan <= 0.0f ? 1.0f : 1.0f - pan;
+                            gr = pan >= 0.0f ? 1.0f : 1.0f + pan;
+                        }
+                        l += ol * slot.level * gl;
+                        r += or_ * slot.level * gr;
                     }
-                    l += ol * slot.level * gl;
-                    r += or_ * slot.level * gr;
-                }
-                if (patch.noiseLevel > 0.001f)
-                {
-                    const float nz = noise.next() * patch.noiseLevel;
-                    l += nz; r += nz;
+                    if (patch.noiseLevel > 0.001f)
+                    {
+                        const float nz = noise.next() * patch.noiseLevel;
+                        l += nz; r += nz;
+                    }
                 }
 
                 l = dsp::driveStage (l, patch.filter.drive);
@@ -236,14 +273,27 @@ public:
                 l = filtL.process (l, patch.filter.type);
                 r = filtR.process (r, patch.filter.type);
 
+                // DDSP layer: mono additive stack through its own drive +
+                // filter. Its envelope is a near-transparent gate (the
+                // source's real contour lives in the frames themselves).
+                float d = 0.0f;
+                if (ddspOn)
+                {
+                    d = ddsp.renderSample (noise);
+                    d = dsp::driveStage (d, patch.filter.drive);
+                    d = ddspFilt.process (d, patch.filter.type);
+                }
+
                 // 0.32 leaves headroom for chords: voices sum directly into
                 // the mix, and a clipped sum reads as pops, not loudness.
-                float amp = ampEnv.getNextSample() * velAmp * 0.32f;
+                float amp  = ampEnv.getNextSample()  * velAmp * 0.32f * layerScale;
+                float dAmp = ddspEnv.getNextSample() * velAmp * 0.32f * layerScale;
 
                 if (fading)
                 {
                     fadeGain = juce::jmax (0.0f, fadeGain - fadeStep);
-                    amp *= fadeGain;
+                    amp  *= fadeGain;
+                    dAmp *= fadeGain;
 
                     if (fadeGain <= 0.0f)
                     {
@@ -263,15 +313,18 @@ public:
                     }
                 }
 
-                outL[i + n] += l * amp;
-                outR[i + n] += r * amp;
+                outL[i + n] += l * amp + d * dAmp;
+                outR[i + n] += r * amp + d * dAmp;
             }
             i += consumed;
             if (restarted)
                 continue;
             samplesUntilControl -= consumed;
 
-            if (! ampEnv.isActive())
+            // The DDSP layer's gate can outlive the recipe envelope (e.g. a
+            // one-shot patch with zero sustain): keep the voice alive until
+            // every audible layer has finished.
+            if (! ampEnv.isActive() && (! ddspOn || ! ddspEnv.isActive()))
             {
                 active = false;
                 return false;
@@ -302,6 +355,11 @@ private:
                                 juce::jmax (0.005f, patch.ampEnv.release) });
         filterEnv.setParameters ({ patch.filterEnv.attack, patch.filterEnv.decay,
                                    patch.filterEnv.sustain, patch.filterEnv.release });
+
+        // DDSP layer gate: the source's amplitude contour is baked into the
+        // timbre frames, so only note-off (patch release) shapes it here.
+        ddspEnv.setParameters ({ 0.002f, 0.005f, 1.0f,
+                                 juce::jmax (0.005f, patch.ampEnv.release) });
     }
 
     double sr = 44100.0;
@@ -310,6 +368,11 @@ private:
     dsp::NoiseGen noise;
     dsp::TptSvf   filtL, filtR;
     juce::ADSR    ampEnv, filterEnv;
+
+    // DDSP resynthesis layer (mono source -> one filter, both channels).
+    dsp::DdspResynth ddsp;
+    dsp::TptSvf      ddspFilt;
+    juce::ADSR       ddspEnv;
 
     float  lfoPhase = 0.0f;
     float  fEnvLevel = 0.0f;

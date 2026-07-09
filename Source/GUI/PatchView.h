@@ -9,6 +9,9 @@
         from the sample ("Supersaw (18 ct) · Low-pass 3.4 kHz · ADSR …"),
         the reconstruction tier that produced it, and its confidence.
       - Character profile bars (brightness / warmth / movement / complexity).
+      - Engine selector chips (RECIPE / DDSP / BOTH) bound to the engineMode
+        parameter: play the reconstructed recipe, the DDSP resynthesis of
+        the source stretched across every key, or both layered.
       - 16 macro knobs bound to host-automatable parameters, grouped
         FILTER / AMP ENV / TONE / SPACE. Editing them is editing the
         reconstruction — the patch stays a living synth recipe, never
@@ -53,6 +56,12 @@ private:
 
     std::vector<std::unique_ptr<Knob>> knobs;
     std::array<juce::Rectangle<int>, numRows> rowAreas {};
+
+    // Engine selector: three radio-style chips driving the engineMode
+    // choice parameter (toggle state mirrors the param via the attachment,
+    // so host automation moves the chips too).
+    std::array<juce::TextButton, 3> modeButtons;
+    std::unique_ptr<juce::ParameterAttachment> modeAttachment;
 
     juce::String description { "Import a sample to reconstruct an instrument." };
     juce::String tier;
