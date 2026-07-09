@@ -6,7 +6,7 @@ Axiom is an AI-powered instrument-reconstruction synthesizer (AU / VST3 / Standa
 JUCE 8, C++20). Import a single sample or an isolated stem and Axiom infers the
 *synthesis recipe* behind it — oscillator stack, filter, envelopes, LFO, effects — then
 builds a fully playable 16-voice synthesizer from that recipe. The result is a living,
-editable patch, not stretched audio. Everything runs locally and offline.
+editable patch, not only stretched audio. Everything runs locally and offline.
 
 ## What works today
 
