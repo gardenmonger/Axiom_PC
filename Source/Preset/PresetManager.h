@@ -28,6 +28,7 @@
 #include "../Core/AppPaths.h"
 #include "../Core/DdspTimbre.h"
 #include "../Core/InstrumentPatch.h"
+#include "../Core/SamplerSource.h"
 
 namespace axiom
 {
@@ -55,21 +56,23 @@ public:
     void setCurrentByName (const juce::String& name);
 
     /** A preset is the patch plus (optionally) the DDSP resynthesis frames
-        captured from the source sample — `ddsp` stays default/invalid for
-        presets saved without one. */
+        and the SK-1 varispeed sample captured from the source — `ddsp` /
+        `sampler` stay default/invalid for presets saved without them. */
     struct LoadedPreset
     {
         InstrumentPatch patch;
         DdspTimbre      ddsp;
+        SamplerSource   sampler;
     };
 
     std::optional<LoadedPreset> loadPreset (int index);
 
     /** Saves (or overwrites) `name` and makes it current. Pass the current
-        DDSP timbre so "save captures the sound as heard" includes the
-        resynthesis layer (nullptr / invalid = none stored). */
+        DDSP timbre and SK-1 sample so "save captures the sound as heard"
+        includes those layers (nullptr / invalid = none stored). */
     juce::Result savePreset (const juce::String& name, const InstrumentPatch& patch,
-                             const DdspTimbre* ddsp = nullptr);
+                             const DdspTimbre* ddsp = nullptr,
+                             const SamplerSource* sampler = nullptr);
 
     void setFavorite (int index, bool shouldBeFavorite);
     bool deletePreset (int index);
@@ -78,7 +81,8 @@ private:
     void seedFactoryPresets();
     juce::Result writePresetFile (const juce::File& file, const juce::String& name,
                                   const InstrumentPatch& patch, bool favorite,
-                                  const DdspTimbre* ddsp = nullptr);
+                                  const DdspTimbre* ddsp = nullptr,
+                                  const SamplerSource* sampler = nullptr);
 
     std::vector<PresetInfo> presets;
     int currentIndex = -1;

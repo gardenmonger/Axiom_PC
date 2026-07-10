@@ -76,17 +76,19 @@ std::optional<PresetManager::LoadedPreset> PresetManager::loadPreset (int index)
     LoadedPreset preset;
     preset.patch = patch_io::fromVar (parsed);
 
-    // Optional DDSP layer; absent (or corrupt) leaves an invalid timbre,
-    // which the engine treats as "recipe only".
+    // Optional DDSP / SK-1 layers; absent (or corrupt) blocks stay invalid,
+    // which the engine treats as "that layer unavailable".
     if (auto ddsp = DdspTimbre::fromBase64 (parsed.getProperty ("ddspTimbre", {}).toString()))
         preset.ddsp = std::move (*ddsp);
+    if (auto sk = SamplerSource::fromBase64 (parsed.getProperty ("samplerSource", {}).toString()))
+        preset.sampler = std::move (*sk);
 
     currentIndex = index;
     return preset;
 }
 
 juce::Result PresetManager::savePreset (const juce::String& name, const InstrumentPatch& patch,
-                                        const DdspTimbre* ddsp)
+                                        const DdspTimbre* ddsp, const SamplerSource* sampler)
 {
     const auto trimmed = name.trim();
     if (trimmed.isEmpty())
@@ -100,7 +102,7 @@ juce::Result PresetManager::savePreset (const juce::String& name, const Instrume
     if (file.existsAsFile())
         favorite = (bool) juce::JSON::parse (file.loadFileAsString()).getProperty ("favorite", false);
 
-    if (auto result = writePresetFile (file, trimmed, patch, favorite, ddsp); result.failed())
+    if (auto result = writePresetFile (file, trimmed, patch, favorite, ddsp, sampler); result.failed())
         return result;
 
     rescan();
@@ -145,7 +147,7 @@ bool PresetManager::deletePreset (int index)
 //==============================================================================
 juce::Result PresetManager::writePresetFile (const juce::File& file, const juce::String& name,
                                              const InstrumentPatch& patch, bool favorite,
-                                             const DdspTimbre* ddsp)
+                                             const DdspTimbre* ddsp, const SamplerSource* sampler)
 {
     auto v = patch_io::toVar (patch);
     if (auto* obj = v.getDynamicObject())
@@ -154,10 +156,12 @@ juce::Result PresetManager::writePresetFile (const juce::File& file, const juce:
         obj->setProperty ("favorite", favorite);
         obj->setProperty ("createdAt", juce::Time::getCurrentTime().toISO8601 (true));
 
-        // DDSP frames ride along as base64 so the preset reproduces the
-        // resynthesis layer; old builds simply ignore the extra key.
+        // DDSP frames and the SK-1 sample ride along as base64 so the preset
+        // reproduces those layers; old builds simply ignore the extra keys.
         if (ddsp != nullptr && ddsp->isValid())
             obj->setProperty ("ddspTimbre", ddsp->toBase64());
+        if (sampler != nullptr && sampler->isValid())
+            obj->setProperty ("samplerSource", sampler->toBase64());
     }
 
     if (! file.replaceWithText (juce::JSON::toString (v, false)))

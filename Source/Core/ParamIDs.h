@@ -60,4 +60,17 @@ namespace axiom::params
     // Engine routing: Recipe synth / DDSP resynthesis / both layered
     // (choice indices match axiom::EngineMode — order frozen).
     inline constexpr auto engineMode  = "engineMode";
+
+    // SK-1 pitch-stretch layer (raw varispeed sample playback) + per-layer
+    // blend levels. stretchOn is independent of engineMode so the sample
+    // layer can ride on top of any recipe/DDSP combination.
+    inline constexpr auto stretchOn    = "stretchOn";
+    inline constexpr auto recipeLevel  = "recipeLevel";
+    inline constexpr auto ddspLevel    = "ddspLevel";
+    inline constexpr auto stretchLevel = "stretchLevel";
+    inline constexpr auto stretchCrush = "stretchCrush";
+
+    // Sample-layer playback engine: SK-1 lo-fi read vs modern band-limited
+    // sinc resampling (choice indices match dsp::SkSampler::Engine).
+    inline constexpr auto samplerEngine = "samplerEngine";
 }

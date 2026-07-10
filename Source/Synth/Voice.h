@@ -16,6 +16,12 @@
     runs through its own drive/filter/envelope so layering the two engines
     never colours the classic recipe path.
 
+    A third layer (SkSampler) plays the raw source sample varispeed-style —
+    SK-1 pitch stretch: the read speed IS the pitch, so notes above the
+    root play faster and shorter. It follows the same pitch modulation and
+    filter, has its own bitcrush stage, and blends with the other layers
+    through per-layer level controls (LayerMix).
+
     Voices are owned by SynthEngine in a fixed array — no allocation at
     note-on. The patch is passed by const reference each block; a voice
     latches oscillator configuration at startNote() and tracks continuous
@@ -30,11 +36,36 @@
 #include <JuceHeader.h>
 #include "SynthModules.h"
 #include "DdspResynth.h"
+#include "SkSampler.h"
 #include "../Core/InstrumentPatch.h"
 #include "../Core/DdspTimbre.h"
+#include "../Core/SamplerSource.h"
 
 namespace axiom
 {
+
+/** Per-block layer routing + blend, resolved once by SynthEngine from the
+    engineMode/stretchOn parameters and the available data blocks. */
+struct LayerMix
+{
+    bool  recipeOn  = true;
+    bool  ddspOn    = false;
+    bool  stretchOn = false;
+
+    float recipeLevel  = 1.0f;
+    float ddspLevel    = 1.0f;
+    float stretchLevel = 1.0f;
+    float crush        = 0.0f;   // SK-1 layer bitcrush amount 0..1
+
+    // Sample-layer playback engine: SK-1 lo-fi read or the modern
+    // band-limited (FL-style sinc) resampler.
+    dsp::SkSampler::Engine samplerEngine = dsp::SkSampler::Engine::sk1;
+
+    int numActive() const noexcept
+    {
+        return (recipeOn ? 1 : 0) + (ddspOn ? 1 : 0) + (stretchOn ? 1 : 0);
+    }
+};
 
 class Voice
 {
@@ -47,6 +78,7 @@ public:
         ampEnv.setSampleRate (sampleRate);
         filterEnv.setSampleRate (sampleRate);
         ddspEnv.setSampleRate (sampleRate);
+        stretchEnv.setSampleRate (sampleRate);
         reset();
     }
 
@@ -61,6 +93,8 @@ public:
         filtR.reset();
         ddsp.reset();
         ddspFilt.reset();
+        stretch.reset();
+        stretchFilt.reset();
     }
 
     void startNote (int midiNote, float vel, const InstrumentPatch& patch,
@@ -83,6 +117,8 @@ public:
         filtR.reset();
         ddsp.reset();
         ddspFilt.reset();
+        stretch.reset();
+        stretchFilt.reset();
 
         targetHz  = dsp::midiToHz ((float) midiNote);
         currentHz = (patch.glideMs > 1.0f && glideFromHz > 0.0f) ? glideFromHz : targetHz;
@@ -91,9 +127,11 @@ public:
         ampEnv.reset();                  // attack from silence: juce::ADSR
         filterEnv.reset();               // otherwise ramps from its old level
         ddspEnv.reset();
+        stretchEnv.reset();
         ampEnv.noteOn();
         filterEnv.noteOn();
         ddspEnv.noteOn();
+        stretchEnv.noteOn();
 
         lfoPhase = 0.0f;
         samplesUntilControl = 0;
@@ -130,6 +168,7 @@ public:
             ampEnv.noteOff();
             filterEnv.noteOff();
             ddspEnv.noteOff();
+            stretchEnv.noteOff();
         }
         else
         {
@@ -145,23 +184,29 @@ public:
 
     /** Additively renders `numSamples` into outL/outR. `bendSemis` is the
         engine-wide pitch-bend offset; `tables` backs OscType::Harmonic.
-        `timbre`/`recipeOn`/`ddspOn` select the engine layers (see
-        SynthEngine — DDSP is only enabled with a valid timbre).
+        `mix` selects and blends the engine layers (see SynthEngine — DDSP
+        and SK-1 are only enabled with valid timbre/sample blocks).
         Returns false when the voice finished its release during this block. */
     bool render (float* outL, float* outR, int numSamples,
                  const InstrumentPatch& patch, float bendSemis,
                  const dsp::WavetableSet* tables,
-                 const DdspTimbre* timbre, bool recipeOn, bool ddspOn) noexcept
+                 const DdspTimbre* timbre, const SamplerSource* sample,
+                 const LayerMix& mix) noexcept
     {
         if (! active)
             return false;
+
+        const bool recipeOn  = mix.recipeOn;
+        const bool ddspOn    = mix.ddspOn;
+        const bool stretchOn = mix.stretchOn;
 
         updateEnvelopeParams (patch);
 
         const float lfoInc = patch.lfo.rateHz / (float) sr;
 
-        // Both layers live: pull each back so the sum keeps chord headroom.
-        const float layerScale = (recipeOn && ddspOn) ? 0.7f : 1.0f;
+        // Multiple layers live: pull each back so the sum keeps chord headroom.
+        const int   layers     = mix.numActive();
+        const float layerScale = layers >= 3 ? 0.55f : layers == 2 ? 0.7f : 1.0f;
 
         // Recomputed in the control-rate update as well: a steal-fade can
         // restart the voice mid-block with a new velocity.
@@ -227,6 +272,15 @@ public:
                     ddsp.controlUpdate (*timbre, ddspHz, sr, controlInterval);
                     ddspFilt.setParams (cutoff, patch.filter.resonance, sr);
                 }
+
+                if (stretchOn)
+                {
+                    // Sample layer: pitch modulation retunes the read speed.
+                    const float skHz = currentHz * dsp::centsToRatio (pitchCents);
+                    stretch.controlUpdate (*sample, skHz, sr, mix.crush,
+                                           mix.samplerEngine);
+                    stretchFilt.setParams (cutoff, patch.filter.resonance, sr);
+                }
             }
 
             // ---- Sample-rate segment -------------------------------------
@@ -284,16 +338,30 @@ public:
                     d = ddspFilt.process (d, patch.filter.type);
                 }
 
+                // SK-1 layer: raw varispeed read -> bitcrush (inside the
+                // sampler) -> drive -> filter. Gated like the DDSP layer —
+                // the sample carries its own amplitude contour.
+                float k = 0.0f;
+                if (stretchOn)
+                {
+                    k = stretch.renderSample (*sample);
+                    k = dsp::driveStage (k, patch.filter.drive);
+                    k = stretchFilt.process (k, patch.filter.type);
+                }
+
                 // 0.32 leaves headroom for chords: voices sum directly into
                 // the mix, and a clipped sum reads as pops, not loudness.
-                float amp  = ampEnv.getNextSample()  * velAmp * 0.32f * layerScale;
-                float dAmp = ddspEnv.getNextSample() * velAmp * 0.32f * layerScale;
+                const float base = velAmp * 0.32f * layerScale;
+                float amp  = ampEnv.getNextSample()     * base * mix.recipeLevel;
+                float dAmp = ddspEnv.getNextSample()    * base * mix.ddspLevel;
+                float kAmp = stretchEnv.getNextSample() * base * mix.stretchLevel;
 
                 if (fading)
                 {
                     fadeGain = juce::jmax (0.0f, fadeGain - fadeStep);
                     amp  *= fadeGain;
                     dAmp *= fadeGain;
+                    kAmp *= fadeGain;
 
                     if (fadeGain <= 0.0f)
                     {
@@ -313,18 +381,20 @@ public:
                     }
                 }
 
-                outL[i + n] += l * amp + d * dAmp;
-                outR[i + n] += r * amp + d * dAmp;
+                outL[i + n] += l * amp + d * dAmp + k * kAmp;
+                outR[i + n] += r * amp + d * dAmp + k * kAmp;
             }
             i += consumed;
             if (restarted)
                 continue;
             samplesUntilControl -= consumed;
 
-            // The DDSP layer's gate can outlive the recipe envelope (e.g. a
+            // The DDSP/SK-1 gates can outlive the recipe envelope (e.g. a
             // one-shot patch with zero sustain): keep the voice alive until
             // every audible layer has finished.
-            if (! ampEnv.isActive() && (! ddspOn || ! ddspEnv.isActive()))
+            if (! ampEnv.isActive()
+                && (! ddspOn    || ! ddspEnv.isActive())
+                && (! stretchOn || ! stretchEnv.isActive() || stretch.isFinished()))
             {
                 active = false;
                 return false;
@@ -356,10 +426,12 @@ private:
         filterEnv.setParameters ({ patch.filterEnv.attack, patch.filterEnv.decay,
                                    patch.filterEnv.sustain, patch.filterEnv.release });
 
-        // DDSP layer gate: the source's amplitude contour is baked into the
-        // timbre frames, so only note-off (patch release) shapes it here.
+        // DDSP/SK-1 layer gates: the source's amplitude contour is baked into
+        // the frames/sample itself, so only note-off (patch release) shapes it.
         ddspEnv.setParameters ({ 0.002f, 0.005f, 1.0f,
                                  juce::jmax (0.005f, patch.ampEnv.release) });
+        stretchEnv.setParameters ({ 0.002f, 0.005f, 1.0f,
+                                    juce::jmax (0.005f, patch.ampEnv.release) });
     }
 
     double sr = 44100.0;
@@ -373,6 +445,11 @@ private:
     dsp::DdspResynth ddsp;
     dsp::TptSvf      ddspFilt;
     juce::ADSR       ddspEnv;
+
+    // SK-1 pitch-stretch layer (mono varispeed sample -> one filter).
+    dsp::SkSampler   stretch;
+    dsp::TptSvf      stretchFilt;
+    juce::ADSR       stretchEnv;
 
     float  lfoPhase = 0.0f;
     float  fEnvLevel = 0.0f;

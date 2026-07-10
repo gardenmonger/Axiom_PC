@@ -10,12 +10,14 @@
         the reconstruction tier that produced it, and its confidence.
       - Character profile bars (brightness / warmth / movement / complexity).
       - Engine selector chips (RECIPE / DDSP / BOTH) bound to the engineMode
-        parameter: play the reconstructed recipe, the DDSP resynthesis of
-        the source stretched across every key, or both layered.
-      - 16 macro knobs bound to host-automatable parameters, grouped
-        FILTER / AMP ENV / TONE / SPACE. Editing them is editing the
-        reconstruction — the patch stays a living synth recipe, never
-        frozen audio.
+        parameter, plus an independent SK-1 toggle chip (stretchOn): raw
+        varispeed playback of the source sample layered on top of any
+        recipe/DDSP combination. An HQ chip (samplerEngine) swaps that
+        layer's read between the SK-1 lo-fi path and a modern FL-style
+        band-limited sinc resampler.
+      - 20 macro knobs bound to host-automatable parameters, grouped
+        FILTER / AMP ENV / TONE / SPACE / LAYER MIX. The LAYER MIX row
+        blends the three engine layers and drives the SK-1 bitcrush.
 
   ==============================================================================
 */
@@ -41,7 +43,7 @@ public:
     void resized() override;
 
     static constexpr int knobsPerRow = 4;
-    static constexpr int numRows     = 4;
+    static constexpr int numRows     = 5;
 
 private:
     struct Knob
@@ -59,9 +61,17 @@ private:
 
     // Engine selector: three radio-style chips driving the engineMode
     // choice parameter (toggle state mirrors the param via the attachment,
-    // so host automation moves the chips too).
+    // so host automation moves the chips too), plus an independent SK-1
+    // toggle chip driving the stretchOn bool parameter.
     std::array<juce::TextButton, 3> modeButtons;
     std::unique_ptr<juce::ParameterAttachment> modeAttachment;
+    juce::TextButton stretchButton;
+    std::unique_ptr<juce::ParameterAttachment> stretchAttachment;
+
+    // HQ chip: flips the sample layer between the SK-1 lo-fi read and the
+    // modern band-limited resampler (samplerEngine choice parameter).
+    juce::TextButton hqButton;
+    std::unique_ptr<juce::ParameterAttachment> hqAttachment;
 
     juce::String description { "Import a sample to reconstruct an instrument." };
     juce::String tier;

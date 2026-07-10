@@ -7,6 +7,11 @@ namespace axiom
 void SynthEngine::prepare (double sampleRate, int maxBlockSize)
 {
     sr = sampleRate;
+
+    // Build the modern-engine sinc table here (idempotent) so the first
+    // HQ-mode voice never constructs it under the render callback.
+    dsp::SkSampler::ensureTables();
+
     for (auto& v : voices)
         v.prepare (sampleRate);
     sustainHeld.fill (false);
@@ -49,17 +54,21 @@ void SynthEngine::setPatch (const InstrumentPatch& newPatch)
 {
     const int inactive = prepareInactiveSlot (newPatch);
 
-    // Keep the resynthesis layer alive across knob-driven patch rewrites
-    // (message-thread copy; the audio thread only ever reads the active slot).
-    ddspSlots[(size_t) inactive] = ddspSlots[(size_t) (1 - inactive)];
+    // Keep the resynthesis + SK-1 layers alive across knob-driven patch
+    // rewrites (message-thread copy; the audio thread only ever reads the
+    // active slot).
+    ddspSlots[(size_t) inactive]    = ddspSlots[(size_t) (1 - inactive)];
+    samplerSlots[(size_t) inactive] = samplerSlots[(size_t) (1 - inactive)];
 
     activePatchSlot.store (inactive, std::memory_order_release);
 }
 
-void SynthEngine::setPatch (const InstrumentPatch& newPatch, DdspTimbre newTimbre)
+void SynthEngine::setPatch (const InstrumentPatch& newPatch, DdspTimbre newTimbre,
+                            SamplerSource newSample)
 {
     const int inactive = prepareInactiveSlot (newPatch);
-    ddspSlots[(size_t) inactive] = std::move (newTimbre);
+    ddspSlots[(size_t) inactive]    = std::move (newTimbre);
+    samplerSlots[(size_t) inactive] = std::move (newSample);
     activePatchSlot.store (inactive, std::memory_order_release);
 }
 
@@ -71,6 +80,11 @@ InstrumentPatch SynthEngine::getPatch() const noexcept
 const DdspTimbre& SynthEngine::getDdspTimbre() const noexcept
 {
     return ddspSlots[(size_t) activePatchSlot.load (std::memory_order_acquire)];
+}
+
+const SamplerSource& SynthEngine::getSamplerSource() const noexcept
+{
+    return samplerSlots[(size_t) activePatchSlot.load (std::memory_order_acquire)];
 }
 
 //==============================================================================
@@ -157,21 +171,43 @@ void SynthEngine::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     if (numSamples > mixBuffer.getNumSamples())
         mixBuffer.setSize (2, numSamples, false, true, true);
 
-    // One slot-index load per block: patch, wavetables and timbre stay paired.
-    const int slot = activePatchSlot.load (std::memory_order_acquire);
-    effective     = buildEffectivePatch (patchSlots[(size_t) slot]);
-    currentTables = &tableSlots[(size_t) slot];
-    currentTimbre = &ddspSlots[(size_t) slot];
+    // One slot-index load per block: patch, wavetables, timbre and sample
+    // stay paired.
+    const int slot  = activePatchSlot.load (std::memory_order_acquire);
+    effective       = buildEffectivePatch (patchSlots[(size_t) slot]);
+    currentTables   = &tableSlots[(size_t) slot];
+    currentTimbre   = &ddspSlots[(size_t) slot];
+    currentSampler  = &samplerSlots[(size_t) slot];
 
-    // Engine-layer routing. DDSP needs a timbre block; without one the
-    // recipe engine stays on regardless of the mode so keys never go silent.
+    // Engine-layer routing. DDSP needs a timbre block and SK-1 needs the
+    // source sample; without them the recipe engine stays on regardless of
+    // the mode so keys never go silent.
     {
-        const int mode = overrides != nullptr && overrides->engineMode != nullptr
-                             ? (int) overrides->engineMode->load (std::memory_order_relaxed)
-                             : (int) EngineMode::Recipe;
-        const bool timbreOk = currentTimbre->isValid();
-        ddspOn   = mode != (int) EngineMode::Recipe && timbreOk;
-        recipeOn = mode != (int) EngineMode::Ddsp || ! timbreOk;
+        auto get = [this] (std::atomic<float>* a, float fallback)
+        {
+            return overrides != nullptr && a != nullptr
+                       ? a->load (std::memory_order_relaxed) : fallback;
+        };
+
+        const int  mode      = (int) get (overrides != nullptr ? overrides->engineMode : nullptr,
+                                          (float) (int) EngineMode::Recipe);
+        const bool timbreOk  = currentTimbre->isValid();
+        const bool sampleOk  = currentSampler->isValid();
+
+        layerMix.ddspOn    = mode != (int) EngineMode::Recipe && timbreOk;
+        layerMix.stretchOn = get (overrides != nullptr ? overrides->stretchOn : nullptr, 0.0f) >= 0.5f
+                             && sampleOk;
+        layerMix.recipeOn  = (mode != (int) EngineMode::Ddsp || ! timbreOk)
+                             && ! (mode == (int) EngineMode::Ddsp && layerMix.stretchOn);
+
+        layerMix.recipeLevel  = get (overrides != nullptr ? overrides->recipeLevel  : nullptr, 1.0f);
+        layerMix.ddspLevel    = get (overrides != nullptr ? overrides->ddspLevel    : nullptr, 1.0f);
+        layerMix.stretchLevel = get (overrides != nullptr ? overrides->stretchLevel : nullptr, 1.0f);
+        layerMix.crush        = get (overrides != nullptr ? overrides->stretchCrush : nullptr, 0.0f);
+        layerMix.samplerEngine =
+            get (overrides != nullptr ? overrides->samplerEngine : nullptr, 0.0f) >= 0.5f
+                ? dsp::SkSampler::Engine::modern
+                : dsp::SkSampler::Engine::sk1;
     }
 
     mixBuffer.clear (0, 0, numSamples);
@@ -226,7 +262,7 @@ void SynthEngine::renderSegment (int startSample, int numSamples)
     for (auto& v : voices)
         if (v.isActive())
             v.render (l, r, numSamples, effective, bendSemis, currentTables,
-                      currentTimbre, recipeOn, ddspOn);
+                      currentTimbre, currentSampler, layerMix);
 }
 
 //==============================================================================

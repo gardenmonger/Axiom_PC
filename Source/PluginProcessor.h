@@ -38,6 +38,7 @@
 #include "Core/AudioZone.h"
 #include "Core/DdspTimbre.h"
 #include "Core/InstrumentPatch.h"
+#include "Core/SamplerSource.h"
 #include "AI/InferenceEngine.h"
 #include "AI/Reconstructor.h"
 #include "AI/StemSeparation.h"
@@ -195,7 +196,8 @@ private:
     void applyReconstruction (const axiom::InstrumentPatch& patch,
                               const axiom::AnalysisFeatures& features,
                               const juce::String& tier,
-                              axiom::DdspTimbre ddspTimbre); // message thread
+                              axiom::DdspTimbre ddspTimbre,
+                              axiom::SamplerSource sampler); // message thread
     void applyStems (std::vector<axiom::Stem>&& stems);     // message thread
     void applyPatchToParameters (const axiom::InstrumentPatch& patch);
     void wireOverrides();

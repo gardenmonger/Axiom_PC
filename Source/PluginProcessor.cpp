@@ -93,6 +93,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout AxiomAudioProcessor::createP
     // falls back to the recipe path, so any choice is always audible.
     p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { engineMode, 1 },   "Engine",
                                                          StringArray { "Recipe Synth", "DDSP Resynth", "Both Layered" }, 0));
+
+    // SK-1 pitch-stretch layer: the raw source sample replayed varispeed
+    // (speed = pitch, like a Casio SK-1), toggled independently of the
+    // engine mode and blended against the other layers by the level knobs.
+    p.push_back (std::make_unique<AudioParameterBool>  (ParameterID { stretchOn, 1 },    "SK-1 Stretch", false));
+    p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { recipeLevel, 1 },  "Recipe Level", 0.0f, 1.0f, 1.0f));
+    p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { ddspLevel, 1 },    "DDSP Level",   0.0f, 1.0f, 1.0f));
+    p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { stretchLevel, 1 }, "SK-1 Level",   0.0f, 1.0f, 1.0f));
+    p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { stretchCrush, 1 }, "SK-1 Crush",   0.0f, 1.0f, 0.2f));
+
+    // Sample-layer playback engine (order matches dsp::SkSampler::Engine):
+    // the vintage SK-1 read (linear interp + crush) or a modern FL Studio
+    // style band-limited sinc resampler — clean repitching, crush bypassed.
+    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { samplerEngine, 1 }, "Sampler Engine",
+                                                         StringArray { "SK-1 Lo-Fi", "Modern HQ" }, 0));
     return { p.begin(), p.end() };
 }
 
@@ -137,6 +152,13 @@ void AxiomAudioProcessor::wireOverrides()
     overrides.masterGain    = raw (masterGain);
 
     overrides.engineMode    = raw (engineMode);
+
+    overrides.stretchOn     = raw (stretchOn);
+    overrides.recipeLevel   = raw (recipeLevel);
+    overrides.ddspLevel     = raw (ddspLevel);
+    overrides.stretchLevel  = raw (stretchLevel);
+    overrides.stretchCrush  = raw (stretchCrush);
+    overrides.samplerEngine = raw (samplerEngine);
 }
 
 //==============================================================================
@@ -411,11 +433,46 @@ void AxiomAudioProcessor::runPipeline()
 
     if (analysisJob.threadShouldExit()) return;
 
+    // --- SK-1 pitch-stretch sample -------------------------------------------
+    // The zone audio itself (mono, length-capped) — the varispeed layer
+    // plays this verbatim, so what you hear at the root key IS the source.
+    auto sampler = std::make_shared<SamplerSource>();
+    {
+        const int len = juce::jmin (active.getNumSamples(),
+                                    (int) (SamplerSource::maxSeconds * sr));
+        sampler->audio.assign ((size_t) len, 0.0f);
+        const float chGain = 1.0f / (float) juce::jmax (1, active.getNumChannels());
+        for (int ch = 0; ch < active.getNumChannels(); ++ch)
+        {
+            const float* src = active.getReadPointer (ch);
+            for (int i = 0; i < len; ++i)
+                sampler->audio[(size_t) i] += src[i] * chGain;
+        }
+        sampler->sampleRate = sr;
+        sampler->rootHz     = features.f0Hz > 0.0f ? features.f0Hz
+                                                   : dsp::midiToHz ((float) features.rootMidiNote);
+        sampler->oneShot    = ! features.isSustained;
+
+        // Sustain loop: reuse the DDSP loop region when one was measured,
+        // otherwise loop the back half of the sample.
+        int lo = (int) ((double) len * 0.45);
+        int hi = (int) ((double) len * 0.95);
+        if (ddsp->isValid() && ! ddsp->oneShot && ddsp->frameRate > 0.0f)
+        {
+            const int dLo = (int) ((double) ddsp->loopStartFrame / ddsp->frameRate * sr);
+            const int dHi = (int) ((double) ddsp->loopEndFrame   / ddsp->frameRate * sr);
+            if (dHi - dLo >= 256) { lo = dLo; hi = dHi; }
+        }
+        sampler->loopStart = juce::jlimit (0, juce::jmax (0, len - 2), lo);
+        sampler->loopEnd   = juce::jlimit (sampler->loopStart + 1, len, hi);
+    }
+
     juce::WeakReference<AxiomAudioProcessor> weak (this);
-    juce::MessageManager::callAsync ([weak, patch, features, tier, ddsp]
+    juce::MessageManager::callAsync ([weak, patch, features, tier, ddsp, sampler]
     {
         if (weak != nullptr)
-            weak->applyReconstruction (patch, features, tier, std::move (*ddsp));
+            weak->applyReconstruction (patch, features, tier,
+                                       std::move (*ddsp), std::move (*sampler));
     });
 }
 
@@ -454,14 +511,15 @@ void AxiomAudioProcessor::runSeparation()
 void AxiomAudioProcessor::applyReconstruction (const InstrumentPatch& patch,
                                                const AnalysisFeatures& features,
                                                const juce::String& tier,
-                                               DdspTimbre ddspTimbre)
+                                               DdspTimbre ddspTimbre,
+                                               SamplerSource sampler)
 {
     lastFeatures = features;
     lastTier     = tier;
     lastDdspTier = ddspTimbre.isValid() ? ddspTimbre.tierName : juce::String();
     presetManager.clearCurrent();             // freshly learned sound is unsaved
 
-    engine.setPatch (patch, std::move (ddspTimbre));
+    engine.setPatch (patch, std::move (ddspTimbre), std::move (sampler));
     applyPatchToParameters (patch);
 
     stage.store (PipelineStage::Ready);
@@ -594,11 +652,11 @@ void AxiomAudioProcessor::loadPresetAtIndex (int index)
 {
     if (auto preset = presetManager.loadPreset (index))
     {
-        // The preset defines the whole sound: its DDSP layer replaces the
-        // current one (or clears it when the preset never carried frames).
+        // The preset defines the whole sound: its DDSP + SK-1 layers replace
+        // the current ones (or clear them when the preset never carried any).
         lastDdspTier = preset->ddsp.isValid() ? preset->ddsp.tierName : juce::String();
         const auto patch = preset->patch;
-        engine.setPatch (patch, std::move (preset->ddsp));
+        engine.setPatch (patch, std::move (preset->ddsp), std::move (preset->sampler));
         applyPatchToParameters (patch);
         // Snapshot through the same param round-trip used by isPresetDirty(),
         // so float quantization can't produce a false "edited" state.
@@ -624,11 +682,12 @@ void AxiomAudioProcessor::navigatePreset (int delta)
 
 juce::Result AxiomAudioProcessor::savePresetAs (const juce::String& name)
 {
-    // Save the sound as heard: knob edits are part of the preset, and so is
-    // the DDSP resynthesis layer.
+    // Save the sound as heard: knob edits are part of the preset, and so are
+    // the DDSP resynthesis and SK-1 sample layers.
     const auto effective = getCurrentPatchWithOverrides();
 
-    auto result = presetManager.savePreset (name, effective, &engine.getDdspTimbre());
+    auto result = presetManager.savePreset (name, effective, &engine.getDdspTimbre(),
+                                            &engine.getSamplerSource());
     if (result.wasOk())
     {
         engine.setPatch (effective);          // base patch now matches the file
@@ -652,7 +711,8 @@ void AxiomAudioProcessor::updateCurrentPreset()
         return;
 
     const auto effective = getCurrentPatchWithOverrides();
-    if (presetManager.savePreset (name, effective, &engine.getDdspTimbre()).wasOk())
+    if (presetManager.savePreset (name, effective, &engine.getDdspTimbre(),
+                                  &engine.getSamplerSource()).wasOk())
     {
         engine.setPatch (effective);
         presetSnapshotJson = patch_io::toJson (getCurrentPatchWithOverrides());
@@ -747,6 +807,10 @@ void AxiomAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     // layer (binary blob, ~0.5 MB worst case; hosts handle MB-scale state).
     if (const auto& ddsp = engine.getDdspTimbre(); ddsp.isValid())
         root.setProperty ("ddspTimbre", juce::var (ddsp.toMemoryBlock()), nullptr);
+
+    // Same story for the SK-1 varispeed sample (16-bit PCM blob).
+    if (const auto& sk = engine.getSamplerSource(); sk.isValid())
+        root.setProperty ("samplerSource", juce::var (sk.toMemoryBlock()), nullptr);
     {
         const juce::ScopedLock sl (dataLock);
         root.setProperty ("zoneStart",   zone.startSec, nullptr);
@@ -775,9 +839,14 @@ void AxiomAudioProcessor::setStateInformation (const void* data, int sizeInBytes
             ddsp = std::move (*parsed);
     lastDdspTier = ddsp.isValid() ? ddsp.tierName : juce::String();
 
+    SamplerSource sk;
+    if (auto* block = root.getProperty ("samplerSource").getBinaryData())
+        if (auto parsed = SamplerSource::fromMemoryBlock (block->getData(), block->getSize()))
+            sk = std::move (*parsed);
+
     if (auto patch = patch_io::fromJson (root.getProperty ("patchJson").toString()))
     {
-        engine.setPatch (*patch, std::move (ddsp));
+        engine.setPatch (*patch, std::move (ddsp), std::move (sk));
         stage.store (PipelineStage::Ready);
     }
 

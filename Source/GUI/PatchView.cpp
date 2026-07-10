@@ -7,7 +7,8 @@ namespace axiom
 
 namespace
 {
-    const char* rowTitles[PatchView::numRows] = { "FILTER", "AMP ENVELOPE", "TONE", "SPACE" };
+    const char* rowTitles[PatchView::numRows] = { "FILTER", "AMP ENVELOPE", "TONE", "SPACE",
+                                                  "LAYER MIX" };
 }
 
 PatchView::PatchView (juce::AudioProcessorValueTreeState& apvts)
@@ -41,6 +42,49 @@ PatchView::PatchView (juce::AudioProcessorValueTreeState& apvts)
                 });
             modeAttachment->sendInitialUpdate();
         }
+
+        // SK-1 chip: independent on/off toggle for the pitch-stretch layer.
+        stretchButton.setButtonText ("SK-1");
+        stretchButton.onClick = [this]
+        {
+            if (stretchAttachment != nullptr)
+                stretchAttachment->setValueAsCompleteGesture (
+                    stretchButton.getToggleState() ? 0.0f : 1.0f);
+        };
+        addAndMakeVisible (stretchButton);
+
+        if (auto* param = apvts.getParameter (stretchOn))
+        {
+            stretchAttachment = std::make_unique<juce::ParameterAttachment> (
+                *param, [this] (float value)
+                {
+                    stretchButton.setToggleState (value >= 0.5f,
+                                                  juce::dontSendNotification);
+                });
+            stretchAttachment->sendInitialUpdate();
+        }
+
+        // HQ chip: sample-layer engine — off = SK-1 lo-fi read, on = modern
+        // FL-style band-limited sinc resampler (samplerEngine choices).
+        hqButton.setButtonText ("HQ");
+        hqButton.onClick = [this]
+        {
+            if (hqAttachment != nullptr)
+                hqAttachment->setValueAsCompleteGesture (
+                    hqButton.getToggleState() ? 0.0f : 1.0f);
+        };
+        addAndMakeVisible (hqButton);
+
+        if (auto* param = apvts.getParameter (samplerEngine))
+        {
+            hqAttachment = std::make_unique<juce::ParameterAttachment> (
+                *param, [this] (float value)
+                {
+                    hqButton.setToggleState (value >= 0.5f,
+                                             juce::dontSendNotification);
+                });
+            hqAttachment->sendInitialUpdate();
+        }
     }
 
     // Row 1 — FILTER
@@ -66,6 +110,12 @@ PatchView::PatchView (juce::AudioProcessorValueTreeState& apvts)
     addKnob (apvts, delayMix,   "Delay");
     addKnob (apvts, reverbMix,  "Reverb");
     addKnob (apvts, masterGain, "Gain");
+
+    // Row 5 — LAYER MIX (per-layer blend + SK-1 bitcrush)
+    addKnob (apvts, recipeLevel,  "Recipe");
+    addKnob (apvts, ddspLevel,    "DDSP");
+    addKnob (apvts, stretchLevel, "SK-1");
+    addKnob (apvts, stretchCrush, "Crush");
 }
 
 void PatchView::addKnob (juce::AudioProcessorValueTreeState& apvts,
@@ -213,9 +263,11 @@ void PatchView::resized()
         auto row = area.removeFromTop (26);
         row.removeFromLeft (52);                       // "ENGINE" caption
         row = row.reduced (0, 1);
-        const int cell = row.getWidth() / 3;
+        const int cell = row.getWidth() / 5;
         for (auto& b : modeButtons)
             b.setBounds (row.removeFromLeft (cell).reduced (3, 0));
+        stretchButton.setBounds (row.removeFromLeft (cell).reduced (3, 0));
+        hqButton.setBounds (row.removeFromLeft (cell).reduced (3, 0));
     }
 
     area.removeFromTop (4);

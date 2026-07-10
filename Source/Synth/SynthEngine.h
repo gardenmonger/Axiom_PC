@@ -83,6 +83,16 @@ struct RuntimeOverrides
 
     /** EngineMode choice index (Recipe / DDSP / Both). */
     std::atomic<float>* engineMode    = nullptr;
+
+    // SK-1 pitch-stretch layer toggle/blend + per-layer levels.
+    std::atomic<float>* stretchOn     = nullptr;
+    std::atomic<float>* recipeLevel   = nullptr;
+    std::atomic<float>* ddspLevel     = nullptr;
+    std::atomic<float>* stretchLevel  = nullptr;
+    std::atomic<float>* stretchCrush  = nullptr;
+
+    /** Sample-layer engine choice index (SK-1 Lo-Fi / Modern HQ). */
+    std::atomic<float>* samplerEngine = nullptr;
 };
 
 //==============================================================================
@@ -99,10 +109,11 @@ public:
         preset saves must not drop the resynthesis layer). */
     void setPatch (const InstrumentPatch& newPatch);
 
-    /** Message thread. Installs a patch AND a new DDSP timbre block in one
-        atomic flip (pass a default-constructed timbre to clear the layer —
-        e.g. a preset that never carried one). */
-    void setPatch (const InstrumentPatch& newPatch, DdspTimbre newTimbre);
+    /** Message thread. Installs a patch AND new DDSP timbre / SK-1 sample
+        blocks in one atomic flip (pass default-constructed blocks to clear
+        a layer — e.g. a preset that never carried one). */
+    void setPatch (const InstrumentPatch& newPatch, DdspTimbre newTimbre,
+                   SamplerSource newSample);
 
     /** Returns a copy of the patch the audio thread currently plays. */
     InstrumentPatch getPatch() const noexcept;
@@ -110,6 +121,10 @@ public:
     /** Message thread only: the active DDSP timbre (for state/preset
         serialization). The reference is invalidated by the next setPatch. */
     const DdspTimbre& getDdspTimbre() const noexcept;
+
+    /** Message thread only: the active SK-1 sample (for state/preset
+        serialization). The reference is invalidated by the next setPatch. */
+    const SamplerSource& getSamplerSource() const noexcept;
 
     void setOverrides (const RuntimeOverrides* o) noexcept   { overrides = o; }
 
@@ -140,11 +155,12 @@ private:
     EffectsChain fx;
 
     // Two-slot lock-free patch handoff (see header comment). Spectral
-    // wavetables and the DDSP timbre are built into the matching slot
-    // before the index flips, so patch, tables and timbre swap together.
+    // wavetables, the DDSP timbre and the SK-1 sample are built into the
+    // matching slot before the index flips, so they all swap together.
     std::array<InstrumentPatch, 2>     patchSlots;
     std::array<dsp::WavetableSet, 2>   tableSlots;
     std::array<DdspTimbre, 2>          ddspSlots;
+    std::array<SamplerSource, 2>       samplerSlots;
     std::atomic<int> activePatchSlot { 0 };
 
     /** Writes patch + wavetables into the inactive slot and returns its
@@ -154,10 +170,10 @@ private:
     // Effective (patch + overrides) + tables for the current block; audio
     // thread only, refreshed from a single slot-index load per block.
     InstrumentPatch effective;
-    const dsp::WavetableSet* currentTables = nullptr;
-    const DdspTimbre*        currentTimbre = nullptr;
-    bool recipeOn = true;
-    bool ddspOn   = false;
+    const dsp::WavetableSet* currentTables  = nullptr;
+    const DdspTimbre*        currentTimbre  = nullptr;
+    const SamplerSource*     currentSampler = nullptr;
+    LayerMix layerMix;
 
     const RuntimeOverrides* overrides = nullptr;
 
