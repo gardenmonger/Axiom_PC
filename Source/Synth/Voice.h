@@ -124,8 +124,8 @@ public:
         currentHz = (patch.glideMs > 1.0f && glideFromHz > 0.0f) ? glideFromHz : targetHz;
 
         updateEnvelopeParams (patch);
-        ampEnv.reset();                  // attack from silence: juce::ADSR
-        filterEnv.reset();               // otherwise ramps from its old level
+        ampEnv.reset();                  // attack from silence, not from
+        filterEnv.reset();               // whatever level the last note left
         ddspEnv.reset();
         stretchEnv.reset();
         ampEnv.noteOn();
@@ -418,7 +418,7 @@ private:
     void updateEnvelopeParams (const InstrumentPatch& patch) noexcept
     {
         // Floor the amp times: a reconstructed patch can carry 0 s attack or
-        // release, and a zero-time jump in juce::ADSR is an audible click.
+        // release, and a zero-time envelope jump is an audible click.
         ampEnv.setParameters ({ juce::jmax (0.002f, patch.ampEnv.attack),
                                 juce::jmax (0.002f, patch.ampEnv.decay),
                                 juce::jlimit (0.0f, 1.0f, patch.ampEnv.sustain),
@@ -439,17 +439,19 @@ private:
     std::array<dsp::Oscillator, InstrumentPatch::maxOscs> oscs;
     dsp::NoiseGen noise;
     dsp::TptSvf   filtL, filtR;
-    juce::ADSR    ampEnv, filterEnv;
+
+    // Analog-style exponential ADSRs (RC curves — SynthGenesis Vol 10 Ch 7).
+    dsp::AnalogAdsr ampEnv, filterEnv;
 
     // DDSP resynthesis layer (mono source -> one filter, both channels).
     dsp::DdspResynth ddsp;
     dsp::TptSvf      ddspFilt;
-    juce::ADSR       ddspEnv;
+    dsp::AnalogAdsr  ddspEnv;
 
     // SK-1 pitch-stretch layer (mono varispeed sample -> one filter).
     dsp::SkSampler   stretch;
     dsp::TptSvf      stretchFilt;
-    juce::ADSR       stretchEnv;
+    dsp::AnalogAdsr  stretchEnv;
 
     float  lfoPhase = 0.0f;
     float  fEnvLevel = 0.0f;

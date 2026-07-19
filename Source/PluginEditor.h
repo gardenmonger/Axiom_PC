@@ -80,6 +80,9 @@ private:
 
     juce::Label statusLabel;
 
+    // Performance-dock panel painted behind the keyboard + status strip.
+    juce::Rectangle<int> dockArea;
+
     std::unique_ptr<juce::FileChooser> exportChooser;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AxiomAudioProcessorEditor)

@@ -39,12 +39,15 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     addAndMakeVisible (importButton);
     importButton.onClick = [this] { waveformView.openFilePicker(); };
 
+    // Separate / Export are primary actions in the SG button system.
     addAndMakeVisible (separateButton);
     separateButton.setTooltip ("Split the imported audio into stems");
     separateButton.onClick = [this] { processor.requestStemSeparation(); };
+    AxiomLookAndFeel::setPrimary (separateButton);
 
     addAndMakeVisible (exportButton);
     exportButton.onClick = [this] { launchExport(); };
+    AxiomLookAndFeel::setPrimary (exportButton);
 
     keyboard.setAvailableRange (21, 108);   // 88 keys
     keyboard.setOctaveForMiddleC (4);
@@ -76,33 +79,60 @@ void AxiomAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (palette::background);
 
-    // Header.
-    auto header = getLocalBounds().removeFromTop (56).reduced (18, 0);
+    // Navigation bar: elevated strip with a hairline base (SG Vol 3 Ch 2).
+    auto headerStrip = getLocalBounds().removeFromTop (metrics::navBarHeight);
+    g.setGradientFill (juce::ColourGradient (palette::panel,
+                                             0.0f, (float) headerStrip.getY(),
+                                             palette::background,
+                                             0.0f, (float) headerStrip.getBottom(), false));
+    g.fillRect (headerStrip);
+    g.setColour (palette::outline.withAlpha (0.5f));
+    g.fillRect (headerStrip.removeFromBottom (1));
 
-    g.setColour (palette::text);
-    g.setFont (juce::Font (juce::FontOptions (24.0f)).boldened());
-    g.drawText ("AXIOM", header.removeFromLeft (110), juce::Justification::centredLeft);
+    // Brand: neural-core dot + wordmark.
+    auto header = getLocalBounds().removeFromTop (metrics::navBarHeight).reduced (18, 0);
+    {
+        auto brand = header.removeFromLeft (110);
+        const float cy = (float) brand.getCentreY();
+        const float cx = (float) brand.getX() + 7.0f;
+
+        g.setColour (palette::accent.withAlpha (0.25f));            // halo
+        g.fillEllipse (cx - 8.0f, cy - 8.0f, 16.0f, 16.0f);
+        g.setColour (palette::accent);                              // core
+        g.fillEllipse (cx - 3.5f, cy - 3.5f, 7.0f, 7.0f);
+
+        g.setColour (palette::text);
+        g.setFont (juce::Font (juce::FontOptions (24.0f)).boldened());
+        g.drawText ("AXIOM", brand.withTrimmedLeft (22), juce::Justification::centredLeft);
+    }
+
+    // Performance dock: raised panel behind keyboard + status (SG Vol 3 Ch 6).
+    if (! dockArea.isEmpty())
+        AxiomLookAndFeel::drawPanel (g, dockArea.toFloat(), metrics::radiusCard,
+                                     palette::panel);
 }
 
 void AxiomAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
 
-    // Header row: brand left, preset bar centred, action buttons right.
-    auto header = area.removeFromTop (56).reduced (18, 12);
-    exportButton.setBounds (header.removeFromRight (92));
-    header.removeFromRight (8);
-    separateButton.setBounds (header.removeFromRight (92));
-    header.removeFromRight (8);
-    importButton.setBounds (header.removeFromRight (92));
+    // Nav bar: brand left, preset bar centred, action buttons right.
+    auto header = area.removeFromTop (metrics::navBarHeight).reduced (18, 14);
+    exportButton.setBounds (header.removeFromRight (96));
+    header.removeFromRight (metrics::grid);
+    separateButton.setBounds (header.removeFromRight (96));
+    header.removeFromRight (metrics::grid);
+    importButton.setBounds (header.removeFromRight (96));
     header.removeFromRight (12);
-    header.removeFromLeft (110);              // brand text space (painted)
+    header.removeFromLeft (110);              // brand mark space (painted)
     presetBar.setBounds (header.withSizeKeepingCentre (juce::jmin (420, header.getWidth()),
                                                        header.getHeight()));
 
-    // Status strip + keyboard at the bottom.
-    statusLabel.setBounds (area.removeFromBottom (24).reduced (18, 0));
-    keyboard.setBounds (area.removeFromBottom (92).reduced (14, 4));
+    // Performance dock: keyboard + status strip on one raised panel.
+    dockArea = area.removeFromBottom (128).reduced (12, 4);
+    auto dock = dockArea.reduced (10, 6);
+    statusLabel.setBounds (dock.removeFromBottom (22));
+    keyboard.setBounds (dock.reduced (2, 2));
     keyboard.setKeyWidth (juce::jmax (10.0f, (float) keyboard.getWidth() / 52.0f));
 
     // Centre: left column (waveform / stem chips / sphere) + right patch panel.

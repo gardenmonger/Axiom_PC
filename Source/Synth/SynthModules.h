@@ -266,6 +266,131 @@ private:
     float ic1eq = 0.0f, ic2eq = 0.0f;
 };
 
+//==============================================================================
+/** Analog-style ADSR with exponential (RC-charging) segments.
+
+    Replaces the linear juce::ADSR per the SynthGenesis DSP spec (Vol 10
+    Ch 7): exponential curves emulate analog capacitor charging and sound
+    more natural, and release always starts from the current level so
+    continuity is preserved regardless of where note-off lands.
+
+    One-pole recurrence per segment (x' = base + x * coef, EarLevel-style):
+    the attack aims past 1.0 (overshoot ratio) for the classic convex RC
+    rise; decay/release aim slightly below their target so they terminate.
+    Coefficients are only recomputed when a parameter actually changes, so
+    per-block setParameters() calls stay cheap. API mirrors the subset of
+    juce::ADSR the voice uses. */
+class AnalogAdsr
+{
+public:
+    struct Parameters
+    {
+        float attack = 0.01f, decay = 0.1f, sustain = 1.0f, release = 0.1f;
+    };
+
+    AnalogAdsr() noexcept { recalc(); }   // valid coefficients even if the
+                                          // defaults are never overridden
+
+    void setSampleRate (double newRate) noexcept
+    {
+        if (sr != newRate)
+        {
+            sr = newRate;
+            recalc();
+        }
+    }
+
+    void setParameters (const Parameters& p) noexcept
+    {
+        if (p.attack != params.attack || p.decay != params.decay
+            || p.sustain != params.sustain || p.release != params.release)
+        {
+            params = p;
+            recalc();
+        }
+    }
+
+    void reset() noexcept   { state = State::idle; out = 0.0f; }
+    void noteOn() noexcept  { state = State::attack; }
+
+    void noteOff() noexcept
+    {
+        if (state != State::idle)
+            state = State::release;
+    }
+
+    bool isActive() const noexcept { return state != State::idle; }
+
+    float getNextSample() noexcept
+    {
+        switch (state)
+        {
+            case State::attack:
+                out = attackBase + out * attackCoef;
+                if (out >= 1.0f) { out = 1.0f; state = State::decay; }
+                break;
+
+            case State::decay:
+                out = decayBase + out * decayCoef;
+                if (out <= params.sustain)
+                    state = State::sustain;     // no snap: sustain glide takes over
+                break;
+
+            case State::sustain:
+                // Track live sustain edits on held notes with a short glide
+                // (~5 ms) instead of stepping.
+                out += (params.sustain - out) * sustainGlide;
+                break;
+
+            case State::release:
+                out = releaseBase + out * releaseCoef;
+                if (out <= 1.0e-4f) { out = 0.0f; state = State::idle; }
+                break;
+
+            case State::idle:
+                return 0.0f;
+        }
+        return out;
+    }
+
+private:
+    enum class State { idle, attack, decay, sustain, release };
+
+    // Overshoot ratios: attack 0.3 gives the soft convex analog rise;
+    // decay/release 1e-4 gives a near-complete exponential fall.
+    static constexpr float ratioA  = 0.3f;
+    static constexpr float ratioDR = 1.0e-4f;
+
+    float segmentCoef (float timeSec, float ratio) const noexcept
+    {
+        const float n = timeSec * (float) sr;
+        return n <= 0.0f ? 0.0f
+                         : std::exp (-std::log ((1.0f + ratio) / ratio) / n);
+    }
+
+    void recalc() noexcept
+    {
+        attackCoef   = segmentCoef (params.attack, ratioA);
+        attackBase   = (1.0f + ratioA) * (1.0f - attackCoef);
+        decayCoef    = segmentCoef (params.decay, ratioDR);
+        decayBase    = (params.sustain - ratioDR) * (1.0f - decayCoef);
+        releaseCoef  = segmentCoef (params.release, ratioDR);
+        releaseBase  = -ratioDR * (1.0f - releaseCoef);
+        sustainGlide = 1.0f - std::exp (-1.0f / (0.005f * (float) sr));
+    }
+
+    double sr = 44100.0;
+    Parameters params;
+    State  state = State::idle;
+    float  out = 0.0f;
+
+    float attackCoef = 0.0f, attackBase = 1.0f;
+    float decayCoef = 0.0f, decayBase = 0.0f;
+    float releaseCoef = 0.0f, releaseBase = 0.0f;
+    float sustainGlide = 0.005f;
+};
+
+//==============================================================================
 /** Soft-clipping drive stage placed before the filter (analog-style). */
 inline float driveStage (float x, float drive) noexcept
 {

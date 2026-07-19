@@ -55,7 +55,7 @@ void PresetBar::refresh (const juce::StringArray& names, const juce::Array<bool>
     const bool isFav      = hasCurrent && presetFavorites[current];
     favButton.setButtonText (isFav ? heartFull : heartHollow);
     favButton.setColour (juce::TextButton::textColourOffId,
-                         isFav ? palette::accent : palette::textDim);
+                         isFav ? palette::gold : palette::textDim);   // gold = premium state
     favButton.setEnabled (hasCurrent);
 
     prevButton.setEnabled (! presetNames.isEmpty());

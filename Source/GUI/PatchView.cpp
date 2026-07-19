@@ -161,7 +161,7 @@ void PatchView::setPatchInfo (const InstrumentPatch& patch, const juce::String& 
 void PatchView::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat().reduced (2.0f);
-    AxiomLookAndFeel::drawPanel (g, bounds, 14.0f);
+    AxiomLookAndFeel::drawPanel (g, bounds, metrics::radiusCard, palette::card);
 
     auto area = getLocalBounds().reduced (16, 12);
 
@@ -199,11 +199,17 @@ void PatchView::paint (juce::Graphics& g)
         auto bar = row.reduced (0, 5).toFloat();
         g.setColour (palette::outline);
         g.fillRoundedRectangle (bar, 3.0f);
-        const auto fillColour = confidence > 0.6f ? palette::accent
-                              : confidence > 0.3f ? palette::warning
-                                                  : palette::textDim;
-        g.setColour (fillColour);
-        g.fillRoundedRectangle (bar.withWidth (juce::jmax (4.0f, bar.getWidth() * confidence)), 3.0f);
+
+        // SG confidence meter: Neural Blue -> Gold capsule; low confidence
+        // stays dim so the gradient itself reads as certainty.
+        const auto fill = bar.withWidth (juce::jmax (4.0f, bar.getWidth() * confidence));
+        if (confidence > 0.3f)
+            g.setGradientFill (juce::ColourGradient (palette::accent, bar.getX(), bar.getCentreY(),
+                                                     palette::gold, bar.getRight(), bar.getCentreY(),
+                                                     false));
+        else
+            g.setColour (palette::textDim);
+        g.fillRoundedRectangle (fill, 3.0f);
     }
 
     area.removeFromTop (6);

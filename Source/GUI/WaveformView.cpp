@@ -323,22 +323,24 @@ void WaveformView::mouseMove (const juce::MouseEvent& e)
 void WaveformView::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat().reduced (2.0f);
-    AxiomLookAndFeel::drawPanel (g, bounds, 14.0f);
+    AxiomLookAndFeel::drawPanel (g, bounds, metrics::radiusCard);
 
     auto content = bounds.reduced (16.0f, 12.0f);
 
     if (dragActive)
     {
         g.setColour (palette::accent.withAlpha (0.10f));
-        g.fillRoundedRectangle (bounds, 14.0f);
+        g.fillRoundedRectangle (bounds, metrics::radiusCard);
     }
 
     if (thumbnail.getTotalLength() > 0.0 && totalLengthSec > 0.0)
     {
         const auto area = waveArea();
 
-        // Waveform (current view window only).
-        g.setColour (palette::accent.withAlpha (0.75f));
+        // Neural Blue waveform with a soft glow pass beneath the crisp one.
+        g.setColour (palette::accent.withAlpha (0.18f));
+        thumbnail.drawChannels (g, area.toNearestInt(), viewStartSec(), viewEndSec(), 1.0f);
+        g.setColour (palette::accent.withAlpha (0.80f));
         thumbnail.drawChannels (g, area.toNearestInt(), viewStartSec(), viewEndSec(), 0.92f);
 
         // Zone overlay is drawn in view coordinates — clip so markers that

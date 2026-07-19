@@ -186,11 +186,11 @@ void EmbeddingSphereView::buildEdges()
 void EmbeddingSphereView::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (2.0f);
-    AxiomLookAndFeel::drawPanel (g, bounds, 14.0f, spaceMid);
+    AxiomLookAndFeel::drawPanel (g, bounds, metrics::radiusCard, spaceMid);
 
     g.saveState();
     juce::Path clip;
-    clip.addRoundedRectangle (bounds, 14.0f);
+    clip.addRoundedRectangle (bounds, metrics::radiusCard);
     g.reduceClipRegion (clip);
 
     // Deep-space gradient + nebulae.
@@ -211,6 +211,18 @@ void EmbeddingSphereView::paint (juce::Graphics& g)
     nebula (nebulaViolet, -0.55f, -0.35f, 1.5f);
     nebula (nebulaBlue,    0.65f,  0.45f, 1.3f);
     nebula (nebulaTeal,    0.15f, -0.65f, 1.0f);
+
+    // Core nucleus: slow 3 s breathing glow — Neural Blue while idle,
+    // stable gold once an instrument is ready (SG Neural Core states).
+    {
+        const float breath = 0.5f + 0.5f * std::sin (phase * 2.094f);   // ~3 s cycle
+        const auto  coreColour = hasFeatures ? starGold : starCyan;
+        const float coreR = R * (hasFeatures ? 0.30f : 0.24f) * (0.85f + 0.15f * breath);
+        g.setGradientFill (juce::ColourGradient (
+            coreColour.withAlpha (hasFeatures ? 0.16f : 0.10f), centre.x, centre.y,
+            coreColour.withAlpha (0.0f), centre.x + coreR, centre.y + coreR, true));
+        g.fillEllipse (centre.x - coreR, centre.y - coreR, coreR * 2.0f, coreR * 2.0f);
+    }
 
     // 3-D -> 2-D: slow Y rotation + slight tilt, perspective by depth.
     const float rotY = phase * 0.22f;
@@ -268,7 +280,7 @@ void EmbeddingSphereView::paint (juce::Graphics& g)
     // Caption.
     g.setColour (palette::textDim.withAlpha (0.9f));
     g.setFont (juce::Font (juce::FontOptions (10.5f)).boldened());
-    g.drawText ("NEURAL EMBEDDING", bounds.reduced (14.0f, 10.0f),
+    g.drawText ("NEURAL CORE", bounds.reduced (14.0f, 10.0f),
                 juce::Justification::topLeft);
     if (! hasFeatures)
     {
